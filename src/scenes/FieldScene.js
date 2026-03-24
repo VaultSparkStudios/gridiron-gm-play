@@ -9,6 +9,8 @@ const FIELD_RIGHT = 700;
 
 function yardToX(y) { return FIELD_LEFT + y * YARD_W; }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+// pixels/second from a speed rating
+function pxs(spd, base, scale) { return base + (spd - 70) * scale; }
 
 export class FieldScene extends Phaser.Scene {
   constructor() { super('Field'); }
@@ -22,10 +24,10 @@ export class FieldScene extends Phaser.Scene {
     this.phase = 'presnap';
     this.jukeCD = 0;
     this._aiAngle = 0; this._aiJukeCD = 0;
-    this._aiRunSpeed = 85; this._defSpd = 115;
     this.aiDown = 1; this.aiToGo = 10;
     this._lastReceiver = null;
     this._passRushActive = false;
+    this._pocketBeaten = [false, false, false];
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this.time.delayedCall(200, () => {
@@ -34,7 +36,7 @@ export class FieldScene extends Phaser.Scene {
     });
   }
 
-  // ─── FIELD DRAW ───────────────────────────────────────────────────────────
+  // ─── FIELD ────────────────────────────────────────────────────────────────
 
   _drawField() {
     const g = this.add.graphics();
@@ -49,39 +51,30 @@ export class FieldScene extends Phaser.Scene {
     this.add.text(50,  FIELD_Y + FIELD_H/2, 'END\nZONE', { fontSize:'11px', fontFamily:'monospace', color:'#166534', align:'center' }).setOrigin(0.5);
     this.add.text(750, FIELD_Y + FIELD_H/2, 'END\nZONE', { fontSize:'11px', fontFamily:'monospace', color:'#166534', align:'center' }).setOrigin(0.5);
     for (let y = 10; y <= 90; y += 10) {
-      const label = y <= 50 ? y : 100 - y;
-      this.add.text(yardToX(y), FIELD_Y + 10, String(label), { fontSize:'9px', fontFamily:'monospace', color:'#166534' }).setOrigin(0.5, 0);
+      this.add.text(yardToX(y), FIELD_Y + 10, String(y<=50?y:100-y), { fontSize:'9px', fontFamily:'monospace', color:'#166534' }).setOrigin(0.5, 0);
     }
-    this.losLine = this.add.graphics();
+    this.losLine      = this.add.graphics();
     this.firstDownLine = this.add.graphics();
-    this.arcGfx = this.add.graphics();
+    this.arcGfx        = this.add.graphics();
     this.add.text(4, FIELD_Y + FIELD_H + 8,
-      'Offense: WASD/Arrows  •  Juke: SPACE  •  Pass: click receiver  •  Defense: WASD to tackle',
+      'Offense: WASD / Juke: SPACE / Pass: click receiver  •  Defense: WASD to tackle',
       { fontSize:'9px', fontFamily:'monospace', color:'#334155' });
   }
 
-  _createBall() {
-    this.ball = this.add.circle(0, 0, 6, 0xd97706).setDepth(10);
-  }
+  _createBall() { this.ball = this.add.circle(0, 0, 6, 0xd97706).setDepth(10); }
 
   // ─── PLAYERS ──────────────────────────────────────────────────────────────
 
   _createPlayers() {
     const tc = Phaser.Display.Color.HexStringToColor(state.team?.clr     || '#22c55e').color;
     const oc = Phaser.Display.Color.HexStringToColor(state.opponent?.clr || '#ef4444').color;
-    this.qb  = this._dot(tc, 'QB',  14);
-    this.rb  = this._dot(tc, 'RB',  13);
-    this.wr1 = this._dot(tc, 'WR',  10);
-    this.wr2 = this._dot(tc, 'WR',  10);
-    this.te  = this._dot(tc, 'TE',  12);
-    this.ol  = this._dot(tc, 'OL',  13);
+    this.qb  = this._dot(tc, 'QB',  14);  this.rb  = this._dot(tc, 'RB',  13);
+    this.wr1 = this._dot(tc, 'WR',  10);  this.wr2 = this._dot(tc, 'WR',  10);
+    this.te  = this._dot(tc, 'TE',  12);  this.ol  = this._dot(tc, 'OL',  13);
     this.offPlayers = [this.qb, this.rb, this.wr1, this.wr2, this.te, this.ol];
-    this.dl  = this._dot(oc, 'DL', 14);
-    this.dl2 = this._dot(oc, 'DL', 14);
-    this.lb  = this._dot(oc, 'LB', 12);
-    this.lb2 = this._dot(oc, 'LB', 12);
-    this.cb1 = this._dot(oc, 'CB', 10);
-    this.cb2 = this._dot(oc, 'CB', 10);
+    this.dl  = this._dot(oc, 'DL', 14);  this.dl2 = this._dot(oc, 'DL', 14);
+    this.lb  = this._dot(oc, 'LB', 12);  this.lb2 = this._dot(oc, 'LB', 12);
+    this.cb1 = this._dot(oc, 'CB', 10);  this.cb2 = this._dot(oc, 'CB', 10);
     this.saf = this._dot(oc, 'S',  11);
     this.defPlayers = [this.dl, this.dl2, this.lb, this.lb2, this.cb1, this.cb2, this.saf];
     this.recTargets = [];
@@ -99,8 +92,9 @@ export class FieldScene extends Phaser.Scene {
 
   _place(d, x, y) { d.x = x; d.y = y; if (d._lbl) { d._lbl.x = x; d._lbl.y = y; } }
   _show(d, vis)   { d.setVisible(vis); if (d._lbl) d._lbl.setVisible(vis); }
+  _syncLbl(d)     { if (d._lbl) { d._lbl.x = d.x; d._lbl.y = d.y; } }
 
-  // ─── INPUT ────────────────────────────────────────────────────────────────
+  // ─── INPUT + D-PAD ────────────────────────────────────────────────────────
 
   _setupInput() {
     this.keys = this.input.keyboard.addKeys({
@@ -112,20 +106,18 @@ export class FieldScene extends Phaser.Scene {
     });
   }
 
-  // ─── MOBILE D-PAD ─────────────────────────────────────────────────────────
-
   _buildDPad() {
     this._dpadState = { dx: 0, dy: 0 };
     const bx = 720, by = 452, sz = 34, gap = 3;
-    [{ label:'▲', dx:0,  dy:-1, ox:0,        oy:-(sz+gap) },
-     { label:'▼', dx:0,  dy: 1, ox:0,         oy: (sz+gap) },
-     { label:'◀', dx:-1, dy:0,  ox:-(sz+gap), oy:0         },
-     { label:'▶', dx: 1, dy:0,  ox: (sz+gap), oy:0         }].forEach(({ label, dx, dy, ox, oy }) => {
+    [{ label:'▲',dx:0, dy:-1,ox:0,       oy:-(sz+gap) },
+     { label:'▼',dx:0, dy: 1,ox:0,       oy: (sz+gap) },
+     { label:'◀',dx:-1,dy: 0,ox:-(sz+gap),oy:0        },
+     { label:'▶',dx: 1,dy: 0,ox: (sz+gap),oy:0        }].forEach(({ label,dx,dy,ox,oy }) => {
       const btn = this.add.rectangle(bx+ox, by+oy, sz, sz, 0x334155, 0.65).setDepth(50).setInteractive();
       this.add.text(bx+ox, by+oy, label, { fontSize:'14px', fontFamily:'monospace', color:'#94a3b8' }).setOrigin(0.5).setDepth(51);
-      btn.on('pointerdown', () => { this._dpadState.dx = dx; this._dpadState.dy = dy; });
-      btn.on('pointerup',   () => { if (this._dpadState.dx===dx) this._dpadState.dx=0; if (this._dpadState.dy===dy) this._dpadState.dy=0; });
-      btn.on('pointerout',  () => { if (this._dpadState.dx===dx) this._dpadState.dx=0; if (this._dpadState.dy===dy) this._dpadState.dy=0; });
+      btn.on('pointerdown', ()=>{ this._dpadState.dx=dx; this._dpadState.dy=dy; });
+      btn.on('pointerup',   ()=>{ if(this._dpadState.dx===dx)this._dpadState.dx=0; if(this._dpadState.dy===dy)this._dpadState.dy=0; });
+      btn.on('pointerout',  ()=>{ if(this._dpadState.dx===dx)this._dpadState.dx=0; if(this._dpadState.dy===dy)this._dpadState.dy=0; });
     });
   }
 
@@ -133,19 +125,20 @@ export class FieldScene extends Phaser.Scene {
 
   _resetFormation() {
     const lx = yardToX(state.yardLine), cy = FIELD_Y + FIELD_H / 2;
-    // Restore original labels & show all
+    // Restore original labels
     [...this.offPlayers, ...this.defPlayers].forEach(d => { if (d._lbl && d._origLabel) d._lbl.setText(d._origLabel); });
     this.offPlayers.forEach(d => this._show(d, true));
     this.defPlayers.forEach(d => this._show(d, true));
 
-    this._place(this.qb,  lx - 30, cy);
-    this._place(this.rb,  lx - 55, cy + 22);
-    this._place(this.wr1, lx - 8,  cy - 72);
-    this._place(this.wr2, lx - 8,  cy + 72);
-    this._place(this.te,  lx - 8,  cy - 36);
-    this._place(this.ol,  lx - 10, cy);
-    this._applySchemeFormation(lx, cy, state.opponent?.dcScheme || '4-3');
+    // Offense: QB slightly deeper; OL ON the line of scrimmage
+    this._place(this.qb,  lx - 28, cy);
+    this._place(this.rb,  lx - 50, cy + 20);
+    this._place(this.wr1, lx - 6,  cy - 70);
+    this._place(this.wr2, lx - 6,  cy + 70);
+    this._place(this.te,  lx - 6,  cy - 34);
+    this._place(this.ol,  lx,      cy);     // OL at the LOS — actual line blocker
 
+    this._applySchemeFormation(lx, cy, state.opponent?.dcScheme || '4-3');
     this.ball.x = this.qb.x; this.ball.y = this.qb.y;
     this.phase = 'presnap';
     this.jukeCD = 0;
@@ -157,27 +150,25 @@ export class FieldScene extends Phaser.Scene {
 
   _resetAIFormation() {
     const lx = yardToX(state.yardLine), cy = FIELD_Y + FIELD_H / 2;
-    // AI offense (opp-colored dots) — face LEFT toward user end zone
     this._show(this.dl, true);  this._show(this.dl2, true);
     this._show(this.lb, true);  this._show(this.lb2, true);
     this._show(this.cb1, false); this._show(this.cb2, false); this._show(this.saf, false);
     this._place(this.dl,  lx + 10, cy);
     this._place(this.dl2, lx + 10, cy - 18);
-    this._place(this.lb,  lx + 28, cy - 45);
-    this._place(this.lb2, lx + 28, cy + 45);
+    this._place(this.lb,  lx + 28, cy - 44);
+    this._place(this.lb2, lx + 28, cy + 44);
     this.dl._lbl?.setText('RB'); this.dl2._lbl?.setText('OL');
     this.lb._lbl?.setText('WR'); this.lb2._lbl?.setText('WR');
 
-    // User defense (team-colored dots) — green dots become defenders
     this._show(this.ol, false); this._show(this.te, false);
     this._show(this.qb, true);  this._show(this.rb, true);
     this._show(this.wr1, true); this._show(this.wr2, true);
     this._place(this.rb,  lx - 15, cy);
     this._place(this.qb,  lx - 42, cy + 28);
-    this._place(this.wr1, lx - 32, cy - 52);
-    this._place(this.wr2, lx - 32, cy + 52);
+    this._place(this.wr1, lx - 32, cy - 50);
+    this._place(this.wr2, lx - 32, cy + 50);
     this.rb._lbl?.setText('YOU'); this.qb._lbl?.setText('LB');
-    this.wr1._lbl?.setText('CB'); this.wr2._lbl?.setText('CB');
+    this.wr1._lbl?.setText('CB');  this.wr2._lbl?.setText('CB');
 
     this.userDef  = this.rb;
     this.aiRunner = this.dl;
@@ -186,10 +177,9 @@ export class FieldScene extends Phaser.Scene {
     this._aiAngle = 0; this._aiJukeCD = 0;
 
     const rData = state.opponent?.players?.find(p => p.pos === 'DL') || { spd: 78 };
-    this._aiRunSpeed = 78 + (rData.spd - 70) * 1.2;
-    const dData = state.team?.players?.find(p => p.pos === 'QB') || { spd: 66 };
-    this._defSpd = 100 + (dData.spd - 60) * 1.5;
-
+    const dData = state.team?.players?.find(p => p.pos === 'QB')     || { spd: 66 };
+    this._aiRunSpeed = pxs(rData.spd, 64, 0.9);
+    this._defSpd     = pxs(dData.spd, 90, 1.2);
     this._clearPassRush();
     this._drawLines();
     this._clearArc();
@@ -200,27 +190,26 @@ export class FieldScene extends Phaser.Scene {
     switch (dc) {
       case '3-4':
         this._show(this.dl2, true); this._show(this.lb2, true);
-        this._place(this.dl,  lx+14, cy-10); this._place(this.dl2, lx+14, cy+10);
-        this._place(this.lb,  lx+40, cy-25); this._place(this.lb2, lx+40, cy+25);
-        this._place(this.cb1, lx+18, cy-70); this._place(this.cb2, lx+18, cy+70);
-        this._place(this.saf, lx+80, cy); break;
+        this._place(this.dl,  lx+14,cy-10); this._place(this.dl2,lx+14,cy+10);
+        this._place(this.lb,  lx+40,cy-24); this._place(this.lb2,lx+40,cy+24);
+        this._place(this.cb1, lx+20,cy-68); this._place(this.cb2,lx+20,cy+68);
+        this._place(this.saf, lx+80,cy); break;
       case 'Cover 2':
         this._show(this.dl2, true); this._show(this.lb2, false);
-        this._place(this.dl,  lx+14, cy);
-        this._place(this.lb,  lx+38, cy);
-        this._place(this.cb1, lx+18, cy-55); this._place(this.cb2, lx+18, cy+55);
-        this._place(this.saf, lx+100, cy-45); this._place(this.dl2, lx+100, cy+45); break;
+        this._place(this.dl,  lx+16,cy); this._place(this.lb, lx+40,cy);
+        this._place(this.cb1, lx+18,cy-54); this._place(this.cb2,lx+18,cy+54);
+        this._place(this.saf, lx+105,cy-44); this._place(this.dl2,lx+105,cy+44); break;
       case 'Zone Blitz':
         this._show(this.dl2, false); this._show(this.lb2, true);
-        this._place(this.dl,  lx+14, cy);
-        this._place(this.lb,  lx+20, cy-30); this._place(this.lb2, lx+8, cy+32);
-        this._place(this.cb1, lx+40, cy-60); this._place(this.cb2, lx+40, cy+60);
-        this._place(this.saf, lx+90, cy); break;
+        this._place(this.dl,  lx+16,cy);
+        this._place(this.lb,  lx+22,cy-28); this._place(this.lb2,lx+8,cy+30);
+        this._place(this.cb1, lx+42,cy-58); this._place(this.cb2,lx+42,cy+58);
+        this._place(this.saf, lx+92,cy); break;
       default: // 4-3
         this._show(this.dl2, false); this._show(this.lb2, false);
-        this._place(this.dl,  lx+14, cy); this._place(this.lb,  lx+40, cy+12);
-        this._place(this.cb1, lx+20, cy-66); this._place(this.cb2, lx+20, cy+66);
-        this._place(this.saf, lx+90, cy);
+        this._place(this.dl,  lx+16,cy); this._place(this.lb, lx+42,cy+10);
+        this._place(this.cb1, lx+22,cy-64); this._place(this.cb2,lx+22,cy+64);
+        this._place(this.saf, lx+92,cy);
     }
   }
 
@@ -256,45 +245,69 @@ export class FieldScene extends Phaser.Scene {
     const isScramble = callId === 'scramble';
     const isOutside  = callId === 'run_outside';
     const isDraw     = callId === 'run_draw';
-    this.runner = isScramble ? this.qb : this.rb;
-    this.startX  = this.runner.x;
-    const pData  = state.team?.players?.find(p => p.pos === (isScramble ? 'QB' : 'RB')) || { ovr:78, spd:82, id:'rb1' };
+    this.runner     = isScramble ? this.qb : this.rb;
+    this.startX     = this.runner.x;
+    const pData     = state.team?.players?.find(p => p.pos === (isScramble ? 'QB' : 'RB')) || { ovr:78, spd:82, id:'rb1' };
     this._runnerData = pData;
-    this.runSpd  = 110 + (pData.spd - 70) * 1.6 + (isOutside ? 15 : 0) + (isDraw ? 8 : 0);
-    this.ball.x  = this.runner.x; this.ball.y = this.runner.y;
+    // Tuned: runner 72-90 px/s, QB scramble slightly slower
+    this.runSpd = pxs(pData.spd, isScramble ? 58 : 72, 0.95) + (isOutside ? 8 : 0) + (isDraw ? 6 : 0);
+    this.ball.x = this.runner.x; this.ball.y = this.runner.y;
 
     if (isDraw) {
       this.phase = 'run_draw_fake';
       this.tweens.add({ targets: this.qb, x: this.qb.x - 10, duration: 260, yoyo: true,
-        onUpdate: () => { if (this.qb._lbl) this.qb._lbl.x = this.qb.x; },
-        onComplete: () => { this.phase = 'run'; }
+        onUpdate: () => this._syncLbl(this.qb),
+        onComplete: () => { if (this.phase === 'run_draw_fake') this.phase = 'run'; }
       });
     } else {
       this.phase = 'run';
     }
 
     this._startOLBlocker();
+
     const dc = state.opponent?.dcScheme || '4-3';
-    const rushers = [this.dl];
+    const rushers = [this.dl, this.lb];
     if (dc === '3-4' || dc === 'Zone Blitz') rushers.push(this.lb2);
-    rushers.push(this.lb);
     this._aiRushers(rushers);
     if (isOutside) this._aiCBsSupport();
+
     Sound.whistle();
     this.events.emit('phaseChange', 'run');
   }
 
+  // OL actively interposes between runner and nearest defender
   _startOLBlocker() {
     this.time.addEvent({ delay: 16, loop: true, callback: () => {
       if (this.phase !== 'run' && this.phase !== 'run_draw_fake') return;
-      this.ol.x += (this.runner.x - 20 - this.ol.x) * 0.09;
-      this.ol.y += (this.runner.y - this.ol.y) * 0.09;
-      if (this.ol._lbl) { this.ol._lbl.x = this.ol.x; this.ol._lbl.y = this.ol.y; }
+
+      // Find the highest-threat defender (closest to runner)
+      let nearestDef = null, nearestDist = 999;
+      this.defPlayers.forEach(d => {
+        if (!d.visible) return;
+        const dist = Math.hypot(d.x - this.runner.x, d.y - this.runner.y);
+        if (dist < nearestDist) { nearestDist = dist; nearestDef = d; }
+      });
+
+      if (nearestDef) {
+        // Position OL midway between runner and nearest defender
+        const tx = (this.runner.x * 0.45 + nearestDef.x * 0.55);
+        const ty = (this.runner.y * 0.45 + nearestDef.y * 0.55);
+        this.ol.x += (tx - this.ol.x) * 0.10;
+        this.ol.y += (ty - this.ol.y) * 0.10;
+        this._syncLbl(this.ol);
+      }
+
+      // Push back any defender within contact range
       this.defPlayers.forEach(d => {
         if (!d.visible) return;
         const dx = d.x - this.ol.x, dy = d.y - this.ol.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 26 && dist > 0) { d.x += (dx/dist)*1.8; d.y += (dy/dist)*1.8; if (d._lbl){d._lbl.x=d.x;d._lbl.y=d.y;} }
+        if (dist < 28 && dist > 0) {
+          // Push force scales with overlap
+          const force = (28 - dist) / 28 * 2.6;
+          d.x += (dx/dist)*force; d.y += (dy/dist)*force;
+          this._syncLbl(d);
+        }
       });
     }});
   }
@@ -303,15 +316,17 @@ export class FieldScene extends Phaser.Scene {
     const defData = state.opponent?.players || [];
     dots.forEach((dot, i) => {
       if (!dot.visible) return;
-      const p = defData.find(p => p.pos === (i === 0 ? 'DL' : 'LB')) || { spd: 74 };
+      const pPos  = i === 0 ? 'DL' : 'LB';
+      const pData = defData.find(p => p.pos === pPos) || { spd: 74 };
+      // Tuned: defenders 38-52 px/s — fast enough to pressure, beatable with moves
+      const spd = pxs(pData.spd, 38, 0.52) / 60; // convert to per-frame
       this.time.addEvent({ delay: 16, loop: true, callback: () => {
         if (this.phase !== 'run') return;
         const dx = this.runner.x - dot.x, dy = this.runner.y - dot.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist < 13) { this._tackled(); return; }
-        const spd = (p.spd / 90) * 1.25;
         dot.x += (dx/dist)*spd; dot.y += (dy/dist)*spd;
-        if (dot._lbl) { dot._lbl.x = dot.x; dot._lbl.y = dot.y; }
+        this._syncLbl(dot);
       }});
     });
   }
@@ -323,26 +338,24 @@ export class FieldScene extends Phaser.Scene {
         const dx = this.runner.x - cb.x, dy = this.runner.y - cb.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist < 13) { this._tackled(); return; }
-        if (dist > 80) { cb.x += (dx/dist)*0.6; cb.y += (dy/dist)*0.6; if (cb._lbl){cb._lbl.x=cb.x;cb._lbl.y=cb.y;} }
+        if (dist > 90) { cb.x += (dx/dist)*0.55; cb.y += (dy/dist)*0.55; this._syncLbl(cb); }
       }});
     });
   }
 
   _doJuke() {
     this.jukeCD = 1600;
-    this.runSpd *= 1.25;
-    this.time.delayedCall(300, () => { this.runSpd *= 0.8; });
+    this.runSpd *= 1.22;
+    this.time.delayedCall(320, () => { this.runSpd *= 0.82; });
     Sound.juke();
-    this.tweens.add({ targets: this.runner, scaleX: 1.35, scaleY: 1.35, duration: 140, yoyo: true, ease: 'Bounce.easeOut' });
+    this.tweens.add({ targets: this.runner, scaleX: 1.4, scaleY: 1.4, duration: 140, yoyo: true, ease: 'Bounce.easeOut' });
     this.defPlayers.forEach(d => {
       if (!d.visible) return;
       const dx = d.x - this.runner.x, dy = d.y - this.runner.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < 65 && dist > 0) {
-        const px = d.x + (dx/dist)*50, py = d.y + (dy/dist)*50;
-        this.tweens.add({ targets: d, x: px, y: py, duration: 350, ease: 'Sine.easeOut',
-          onUpdate: () => { if (d._lbl){d._lbl.x=d.x;d._lbl.y=d.y;} }
-        });
+      if (dist < 68 && dist > 0) {
+        this.tweens.add({ targets: d, x: d.x+(dx/dist)*52, y: d.y+(dy/dist)*52, duration: 360, ease: 'Sine.easeOut',
+          onUpdate: () => this._syncLbl(d) });
       }
     });
     if (this._jukeCDBar) this._jukeCDBar.destroy();
@@ -368,97 +381,165 @@ export class FieldScene extends Phaser.Scene {
     this.passVariant = callId.replace('pass_', '');
     const isAction = this.passVariant === 'action';
     if (isAction) {
-      this.tweens.add({ targets: this.rb, x: this.rb.x + 24, duration: 280, yoyo: true,
-        onUpdate: () => { if (this.rb._lbl) this.rb._lbl.x = this.rb.x; }
-      });
+      this.tweens.add({ targets: this.rb, x: this.rb.x + 22, duration: 280, yoyo: true,
+        onUpdate: () => this._syncLbl(this.rb) });
       this.passVariant = 'deep';
     }
     this._animateRoutes(this.passVariant);
+    this._setupPocket();          // ← form OL/TE/RB protection pocket BEFORE pass rush
     this._startPassRush(isAction);
     Sound.whistle();
     this.events.emit('phaseChange', 'pass');
-    this.time.delayedCall(isAction ? 900 : 600, () => this._buildReceiverTargets(isAction));
+    this.time.delayedCall(isAction ? 850 : 550, () => this._buildReceiverTargets(isAction));
   }
 
-  _animateRoutes(variant) {
-    const depth = { quick:35, medium:65, deep:115 }[variant] || 65;
-    [{ p:this.wr1, ty: this.wr1.y + (variant==='quick'?25:variant==='deep'?-20:15) },
-     { p:this.wr2, ty: this.wr2.y - (variant==='quick'?25:variant==='deep'?-20:15) },
-     { p:this.te,  ty: this.te.y  + 18 },
-     { p:this.rb,  ty: this.rb.y  - 10 }].forEach(({ p, ty }) => {
-      const txDepth = p === this.rb ? 28 : p === this.te ? depth*0.7 : depth;
-      const dur = variant==='quick'?450:variant==='deep'?900:650;
-      this.tweens.add({ targets:p, x:p.x+txDepth, y:ty, duration:dur, ease:'Sine.easeOut',
-        onUpdate:()=>{ if(p._lbl){p._lbl.x=p.x;p._lbl.y=p.y;} }
-      });
-    });
-    this.tweens.add({ targets:this.qb, x:this.qb.x-18, duration:350, ease:'Sine.easeOut',
-      onUpdate:()=>{ if(this.qb._lbl) this.qb._lbl.x=this.qb.x; }
+  // OL + TE + RB form protective pocket around QB before routes develop
+  _setupPocket() {
+    this._pocketBeaten = [false, false, false];
+    const qx = this.qb.x, qy = this.qb.y;
+    const positions = [
+      { dot: this.ol,  tx: qx + 18, ty: qy - 14 },   // left guard
+      { dot: this.te,  tx: qx + 18, ty: qy + 14 },   // right guard
+      { dot: this.rb,  tx: qx + 8,  ty: qy + 32 },   // RB chip block
+    ];
+    this._pocketDots = positions.map(p => p.dot);
+    positions.forEach(({ dot, tx, ty }) => {
+      this.tweens.add({ targets: dot, x: tx, y: ty, duration: 200,
+        onUpdate: () => this._syncLbl(dot) });
     });
   }
 
   _startPassRush(isPlayAction = false) {
+    const rushDelay = isPlayAction ? 440 : 0;
     const dc = state.opponent?.dcScheme || '4-3';
     const rushers = [this.dl];
     if (dc === 'Zone Blitz') rushers.push(this.lb2);
-    if (dc === '3-4') rushers.push(this.dl2);
-    const dlData = state.opponent?.players?.find(p => p.pos === 'DL') || { spd:75 };
+    if (dc === '3-4')       rushers.push(this.dl2);
+
+    const dlData = state.opponent?.players?.find(p => p.pos === 'DL') || { spd: 75 };
     this._passRushActive = true;
-    const delay = isPlayAction ? 420 : 0;
-    rushers.forEach((dot, i) => {
-      if (!dot.visible) return;
-      const spd = ((dlData.spd + i*-3) / 90) * 1.1;
-      this.time.delayedCall(delay, () => {
-        this.time.addEvent({ delay:16, loop:true, callback:()=>{
+
+    // Each rusher is assigned a pocket blocker
+    rushers.forEach((rusher, ri) => {
+      if (!rusher.visible) return;
+
+      // Rush speed: relatively slow while blocked (pocket absorbs); faster when free
+      const blockedSpd  = pxs(dlData.spd - ri*3, 10, 0.10) / 60;   // crawl while blocked
+      const freeSpd     = pxs(dlData.spd - ri*3, 46, 0.52) / 60;   // ~50 px/s when free
+
+      // Pocket blocker assigned to this rusher
+      const blockerIdx = ri % 3;
+
+      // Beat time: 1900ms–3800ms from snap (realistic 2-4 second pocket)
+      const beatMs = 1900 + Math.random() * 1900 + rushDelay;
+      this.time.delayedCall(beatMs, () => {
+        this._pocketBeaten[blockerIdx] = true;
+        if (this.phase === 'pass_wait') this.pressureTxt?.setText('PRESSURE!');
+      });
+
+      this.time.delayedCall(rushDelay, () => {
+        this.time.addEvent({ delay: 16, loop: true, callback: () => {
           if (!this._passRushActive) return;
-          const dx = this.qb.x-dot.x, dy = this.qb.y-dot.y;
-          const dist = Math.sqrt(dx*dx+dy*dy);
+          const dx = this.qb.x - rusher.x, dy = this.qb.y - rusher.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
           if (dist < 14) { this._sack(); return; }
-          dot.x += (dx/dist)*spd; dot.y += (dy/dist)*spd;
-          if (dot._lbl){dot._lbl.x=dot.x;dot._lbl.y=dot.y;}
+
+          // Block effect: nearly stop rusher if pocket blocker is in contact
+          let spd = freeSpd;
+          if (!this._pocketBeaten[blockerIdx]) {
+            const blocker = this._pocketDots?.[blockerIdx];
+            if (blocker) {
+              const bdist = Math.hypot(rusher.x - blocker.x, rusher.y - blocker.y);
+              if (bdist < 30) {
+                // Almost fully stopped in contact; gradual release near edge of range
+                spd = blockedSpd + freeSpd * Math.max(0, (bdist - 14) / 16);
+              }
+            }
+          }
+
+          rusher.x += (dx/dist)*spd; rusher.y += (dy/dist)*spd;
+          this._syncLbl(rusher);
         }});
       });
     });
-    this.pressureTxt = this.add.text(this.qb.x, this.qb.y-30, '', {
+
+    // Pocket blockers move to stay between QB and their assigned rusher
+    this.time.addEvent({ delay: 16, loop: true, callback: () => {
+      if (!this._passRushActive) return;
+      this._pocketDots?.forEach((blocker, i) => {
+        if (this._pocketBeaten[i]) return;
+        const rusher = rushers[i % rushers.length];
+        if (!rusher?.visible) return;
+        // Interpose: 35% toward QB, 65% toward rusher — stays in pass lane
+        const tx = this.qb.x * 0.35 + rusher.x * 0.65;
+        const ty = this.qb.y * 0.35 + rusher.y * 0.65;
+        blocker.x += (tx - blocker.x) * 0.07;
+        blocker.y += (ty - blocker.y) * 0.07;
+        this._syncLbl(blocker);
+      });
+    }});
+
+    this.pressureTxt = this.add.text(this.qb.x, this.qb.y - 34, '', {
       fontSize:'11px', fontFamily:'monospace', fontStyle:'bold', color:'#ef4444'
     }).setOrigin(0.5).setDepth(15);
-    this.time.addEvent({ delay:1200+delay, callback:()=>{ if(this.phase==='pass_wait') this.pressureTxt?.setText('PRESSURE!'); } });
-    this.time.addEvent({ delay:2200+delay, callback:()=>{ if(this.phase==='pass_wait') this.pressureTxt?.setText('THROW IT!'); } });
+    // "Throw it" warning fires 900ms after first blocker could be beaten
+    this.time.addEvent({ delay: 2900+rushDelay, callback: ()=>{ if(this.phase==='pass_wait') this.pressureTxt?.setText('THROW IT!'); } });
   }
 
-  _clearPassRush() { this._passRushActive = false; this.pressureTxt?.destroy(); this.pressureTxt = null; }
+  _clearPassRush() {
+    this._passRushActive = false;
+    this._pocketBeaten = [false, false, false];
+    this.pressureTxt?.destroy(); this.pressureTxt = null;
+  }
 
   _sack() {
     if (this.phase !== 'pass_wait') return;
     this._clearPassRush(); this.phase = 'result';
     Sound.sack();
-    this.recTargets.forEach(r=>r?.destroy?.()); this.recTargets = [];
-    const loss = Phaser.Math.Between(4,12);
+    this.recTargets.forEach(r => r?.destroy?.()); this.recTargets = [];
+    const loss = Phaser.Math.Between(4, 11);
     this._endPlay({ yards:-loss, text:`SACK! -${loss} yards`, type:'sack', turnover:false, td:false });
+  }
+
+  _animateRoutes(variant) {
+    const depth = { quick:32, medium:62, deep:110 }[variant] || 62;
+    [{ p:this.wr1, ty: this.wr1.y + (variant==='quick'?22:variant==='deep'?-18:14) },
+     { p:this.wr2, ty: this.wr2.y - (variant==='quick'?22:variant==='deep'?-18:14) },
+     { p:this.te,  ty: this.te.y  + 16 },
+     { p:this.rb,  ty: this.rb.y  - 8  }].forEach(({ p, ty }) => {
+      const txd = p === this.rb ? 24 : p === this.te ? depth*0.65 : depth;
+      const dur = variant==='quick'?420:variant==='deep'?880:620;
+      this.tweens.add({ targets:p, x:p.x+txd, y:ty, duration:dur, ease:'Sine.easeOut',
+        onUpdate:()=>this._syncLbl(p) });
+    });
+    // QB drops back
+    this.tweens.add({ targets:this.qb, x:this.qb.x-16, duration:320, ease:'Sine.easeOut',
+      onUpdate:()=>this._syncLbl(this.qb) });
   }
 
   _buildReceiverTargets(isPlayAction = false) {
     if (this.phase !== 'pass_wait') return;
     const dc = state.opponent?.dcScheme || '4-3';
-    const isZone = dc==='Cover 2' || dc==='Zone Blitz';
+    const isZone   = dc==='Cover 2' || dc==='Zone Blitz';
     const dbRatings = (state.opponent?.players||[]).filter(p=>['CB','S'].includes(p.pos)).map(p=>p.ovr);
     const receivers = [
-      { dot:this.wr1, p:state.team?.players?.find(p=>p.pos==='WR')               || {spd:88,ovr:80,name:'WR', id:'wr1'} },
-      { dot:this.wr2, p:state.team?.players?.filter(p=>p.pos==='WR')[1]           || {spd:84,ovr:76,name:'WR2',id:'wr2'} },
-      { dot:this.te,  p:state.team?.players?.find(p=>p.pos==='TE')                || {spd:72,ovr:74,name:'TE', id:'te1'} },
-      { dot:this.rb,  p:state.team?.players?.find(p=>p.pos==='RB')                || {spd:86,ovr:78,name:'RB', id:'rb1'} },
+      { dot:this.wr1, p:state.team?.players?.find(p=>p.pos==='WR')              || {spd:88,ovr:80,name:'WR', id:'wr1'} },
+      { dot:this.wr2, p:state.team?.players?.filter(p=>p.pos==='WR')[1]          || {spd:84,ovr:76,name:'WR2',id:'wr2'} },
+      { dot:this.te,  p:state.team?.players?.find(p=>p.pos==='TE')               || {spd:72,ovr:74,name:'TE', id:'te1'} },
+      { dot:this.rb,  p:state.team?.players?.find(p=>p.pos==='RB')               || {spd:86,ovr:78,name:'RB', id:'rb1'} },
     ];
     receivers.forEach(({ dot, p }, i) => {
       const cbOvr = dbRatings[i % dbRatings.length] || 75;
-      const actBonus = isPlayAction ? 14 : 0;
-      const isOpen = (p.spd||80)+actBonus > (cbOvr+(isZone?-5:0))*0.95 && Math.random() < 0.52+((p.spd||80)+actBonus-cbOvr)/200;
-      const zone = this.add.circle(dot.x, dot.y, 20, isOpen?0x22c55e:0xef4444, 0.35).setDepth(8).setInteractive({useHandCursor:true});
-      const icon = this.add.text(dot.x, dot.y-30, isOpen?'🟢':'🔴', {fontSize:'15px'}).setOrigin(0.5).setDepth(9);
-      const nmTxt = this.add.text(dot.x, dot.y+24, p.name||p.pos, {fontSize:'7px',fontFamily:'monospace',color:'#fff'}).setOrigin(0.5).setDepth(9);
+      const actBonus = isPlayAction ? 16 : 0;
+      const isOpen = (p.spd||80)+actBonus > (cbOvr+(isZone?-5:0))*0.94 && Math.random() < 0.54+((p.spd||80)+actBonus-cbOvr)/200;
+      const zone = this.add.circle(dot.x, dot.y, 20, isOpen?0x22c55e:0xef4444, 0.32)
+        .setDepth(8).setInteractive({ useHandCursor:true });
+      const icon   = this.add.text(dot.x, dot.y-28, isOpen?'🟢':'🔴', {fontSize:'14px'}).setOrigin(0.5).setDepth(9);
+      const nmTxt  = this.add.text(dot.x, dot.y+22, p.name||p.pos, {fontSize:'7px',fontFamily:'monospace',color:'#fff'}).setOrigin(0.5).setDepth(9);
       zone.on('pointerdown', ()=>{ if(this.phase!=='pass_wait') return; this._lastReceiver=p; this._throwTo(dot, isOpen); });
-      zone.on('pointerover', ()=>zone.setAlpha(0.7));
+      zone.on('pointerover', ()=>zone.setAlpha(0.65));
       zone.on('pointerout',  ()=>zone.setAlpha(1));
-      if (isOpen) this.tweens.add({ targets:zone, scaleX:1.18, scaleY:1.18, duration:550, yoyo:true, repeat:-1 });
+      if (isOpen) this.tweens.add({ targets:zone, scaleX:1.2, scaleY:1.2, duration:520, yoyo:true, repeat:-1 });
       this.recTargets.push(zone, icon, nmTxt);
     });
     if (!isZone) this._aiManCoverage(); else this._aiZoneCoverage();
@@ -472,21 +553,21 @@ export class FieldScene extends Phaser.Scene {
         if (this.phase!=='pass_wait' && this.phase!=='pass_flight') return;
         const dx=wr.x-cb.x, dy=wr.y-cb.y, dist=Math.sqrt(dx*dx+dy*dy);
         if (dist<8) return;
-        cb.x+=(dx/dist)*(spd/90)*1.05; cb.y+=(dy/dist)*(spd/90)*1.05;
-        if(cb._lbl){cb._lbl.x=cb.x;cb._lbl.y=cb.y;}
+        const s=(spd/90)*0.95; // px/frame at 60fps
+        cb.x+=(dx/dist)*s; cb.y+=(dy/dist)*s;
+        this._syncLbl(cb);
       }});
     });
   }
 
   _aiZoneCoverage() {
-    const lx = yardToX(state.yardLine), cy = FIELD_Y+FIELD_H/2;
-    [{ dot:this.cb1, tx:lx+50, ty:cy-55 },
-     { dot:this.cb2, tx:lx+50, ty:cy+55 },
-     { dot:this.saf, tx:lx+110,ty:cy }].forEach(({ dot, tx, ty }) => {
+    const lx=yardToX(state.yardLine), cy=FIELD_Y+FIELD_H/2;
+    [{ dot:this.cb1, tx:lx+52,ty:cy-54 },
+     { dot:this.cb2, tx:lx+52,ty:cy+54 },
+     { dot:this.saf, tx:lx+112,ty:cy }].forEach(({ dot,tx,ty }) => {
       this.time.addEvent({ delay:16, loop:true, callback:()=>{
         if (this.phase!=='pass_wait') return;
-        dot.x+=(tx-dot.x)*0.04; dot.y+=(ty-dot.y)*0.04;
-        if(dot._lbl){dot._lbl.x=dot.x;dot._lbl.y=dot.y;}
+        dot.x+=(tx-dot.x)*0.04; dot.y+=(ty-dot.y)*0.04; this._syncLbl(dot);
       }});
     });
   }
@@ -495,14 +576,14 @@ export class FieldScene extends Phaser.Scene {
     if (this.phase!=='pass_wait') return;
     this.phase = 'pass_flight';
     this._clearPassRush();
-    this.recTargets.forEach(r=>r?.destroy?.()); this.recTargets = [];
+    this.recTargets.forEach(r=>r?.destroy?.()); this.recTargets=[];
     this.pressureTxt?.destroy();
-    const qteBonus = isOpen ? 1.2+Math.random()*0.2 : 0.4+Math.random()*0.15;
+    const qteBonus = isOpen ? 1.18+Math.random()*0.18 : 0.38+Math.random()*0.14;
     const sx=this.ball.x, sy=this.ball.y, ex=receiverDot.x, ey=receiverDot.y;
-    const peakY = Math.min(sy,ey)-40;
-    let t=0; const dur=400;
+    const peakY = Math.min(sy,ey)-38;
+    let t=0; const dur=380;
     const arc = this.time.addEvent({ delay:16, loop:true, callback:()=>{
-      t += 16/dur; if(t>1){arc.remove();this._clearArc();return;}
+      t+=16/dur; if(t>1){arc.remove();this._clearArc();return;}
       const bx=Phaser.Math.Linear(sx,ex,t), by=(1-t)*(1-t)*sy+2*(1-t)*t*peakY+t*t*ey;
       this.ball.x=bx; this.ball.y=by;
       this.arcGfx.clear(); this.arcGfx.lineStyle(1,0xfbbf24,0.5); this.arcGfx.lineBetween(sx,sy,bx,by);
@@ -515,11 +596,11 @@ export class FieldScene extends Phaser.Scene {
   _resolvePlay(qteBonus, type, rawYards) {
     this.phase = 'result';
     this._clearPassRush();
-    const call = state.currentCall || 'run_inside';
+    const call  = state.currentCall || 'run_inside';
     const isRun  = call.startsWith('run_') || call==='scramble';
     const isPass = call.startsWith('pass_');
-    const offP = state.team?.players || [];
-    const defP = state.opponent?.players || [];
+    const offP  = state.team?.players  || [];
+    const defP  = state.opponent?.players || [];
     const qb = offP.find(p=>p.pos==='QB') || { ovr:80, spd:68, id:'qb1' };
     const rb = offP.find(p=>p.pos==='RB') || { ovr:78, spd:86, id:'rb1' };
     const db = defP.find(p=>['CB','S'].includes(p.pos)) || { ovr:76 };
@@ -527,13 +608,14 @@ export class FieldScene extends Phaser.Scene {
     let yards = rawYards;
     if (yards === undefined) {
       if (isRun) {
-        const base = 2 + (rb.spd-70)*0.12 + Phaser.Math.Between(-2,6);
+        // Base 2–5 yards; speed differential adds 0–3 more
+        const base = 2 + ((rb.spd - 70) * 0.10) + Phaser.Math.Between(-1, 5);
         yards = Math.round(base * qteBonus);
       } else if (isPass) {
         const variant = call.replace('pass_','');
-        const isDeep = variant==='deep'||variant==='action';
-        const intCh = isDeep ? 0.12 : 0.04;
-        const compCh = clamp(0.58+(qb.ovr-50)*0.004-(db.ovr-60)*0.002, 0.3, 0.9);
+        const isDeep = variant==='deep' || variant==='action';
+        const intCh  = isDeep ? 0.11 : 0.04;
+        const compCh = clamp(0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002, 0.28, 0.88);
         if (type==='covered' && Math.random()<intCh*2) {
           Sound.int(); state.stats.team.int++;
           this._track(qb.id,'int',1);
@@ -543,24 +625,24 @@ export class FieldScene extends Phaser.Scene {
           Sound.incomplete(); this._track(qb.id,'att',1);
           this._endPlay({ yards:0, text:'Incomplete.', type:'inc', turnover:false, td:false }); return;
         }
-        const base = isDeep ? Phaser.Math.Between(16,38) : variant==='quick' ? Phaser.Math.Between(3,9) : Phaser.Math.Between(7,16);
+        const base = isDeep ? Phaser.Math.Between(14,36) : variant==='quick' ? Phaser.Math.Between(3,8) : Phaser.Math.Between(6,15);
         yards = Math.round(base * qteBonus);
       }
     }
 
     const td = state.yardLine + (yards||0) >= 100;
-    if (td) { Sound.td(); this._tdFlash('TOUCHDOWN! 🏈','#f59e0b'); state.stats.team.td++; }
-    else if (yards >= state.toGo) Sound.firstDown();
-    else if (yards <= 0) Sound.tackle();
+    if (td)                      { Sound.td();        this._tdFlash('TOUCHDOWN! 🏈','#f59e0b'); state.stats.team.td++; }
+    else if (yards >= state.toGo){ Sound.firstDown(); }
+    else if (!td && yards <= 0)  { Sound.tackle(); }
 
     if (isRun) {
-      state.stats.team.rushYds += Math.max(0,yards);
+      state.stats.team.rushYds += Math.max(0, yards);
       const runner = call==='scramble' ? qb : rb;
       this._track(runner.id,'rushYds',Math.max(0,yards)); this._track(runner.id,'rushAtt',1);
       if (td) this._track(runner.id,'td',1);
     }
     if (isPass) {
-      state.stats.team.passYds += Math.max(0,yards);
+      state.stats.team.passYds += Math.max(0, yards);
       this._track(qb.id,'passYds',Math.max(0,yards)); this._track(qb.id,'att',1); this._track(qb.id,'comp',1);
       if (this._lastReceiver) {
         this._track(this._lastReceiver.id,'recYds',Math.max(0,yards));
@@ -583,9 +665,9 @@ export class FieldScene extends Phaser.Scene {
   _endPlay(result) {
     state.lastResult = result;
     if (result.td) {
-      state.score.team += 7; state.yardLine = 25; state.down = 1; state.toGo = 10; state.possession = 'team';
+      state.score.team += 7; state.yardLine=25; state.down=1; state.toGo=10; state.possession='team';
     } else if (result.turnover) {
-      state.possession = 'opp'; state.yardLine = Math.max(5, 100-state.yardLine); state.down = 1; state.toGo = 10;
+      state.possession='opp'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10;
     } else {
       state.yardLine = Math.min(99, state.yardLine + result.yards);
       if (result.yards >= state.toGo) { state.down=1; state.toGo=10; }
@@ -605,9 +687,9 @@ export class FieldScene extends Phaser.Scene {
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
     } else if (state.possession==='opp') {
-      this.time.delayedCall(1900, ()=>this._startAIDrive());
+      this.time.delayedCall(1800, ()=>this._startAIDrive());
     } else {
-      this.time.delayedCall(1900, ()=>{
+      this.time.delayedCall(1800, ()=>{
         this._resetFormation(); this._drawLines();
         const hud = this.scene.get('Hud');
         hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
@@ -632,7 +714,7 @@ export class FieldScene extends Phaser.Scene {
     this.phase = 'result';
     Sound.tackle();
     this.tweens.add({ targets:this.aiRunner, scaleX:0.6, scaleY:0.6, duration:200, yoyo:true });
-    const yardsGiven = Math.round((this.aiStartX - this.aiRunner.x) / YARD_W);
+    const yardsGiven = Math.max(0, Math.round((this.aiStartX - this.aiRunner.x) / YARD_W));
     this._resolveAIPlay(yardsGiven);
   }
 
@@ -644,7 +726,7 @@ export class FieldScene extends Phaser.Scene {
     state.score.opp += 7;
     state.stats.opp.td++;
     state.stats.opp.rushYds += Math.max(0, Math.round((this.aiStartX-FIELD_LEFT)/YARD_W));
-    state.possession = 'team'; state.yardLine=25; state.down=1; state.toGo=10;
+    state.possession='team'; state.yardLine=25; state.down=1; state.toGo=10;
     state.plays++;
     if (state.plays%8===0) state.quarter=Math.min(4,state.quarter+1);
     const result = { text:'OPPONENT TOUCHDOWN! ☠️', td:true, yards:0, turnover:false };
@@ -654,7 +736,7 @@ export class FieldScene extends Phaser.Scene {
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(2000, ()=>this.scene.start('GameOver'));
     } else {
-      this.time.delayedCall(2500, ()=>{
+      this.time.delayedCall(2400, ()=>{
         this._resetFormation(); this._drawLines();
         hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
         this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
@@ -663,24 +745,23 @@ export class FieldScene extends Phaser.Scene {
   }
 
   _resolveAIPlay(yardsGiven) {
-    state.stats.opp.rushYds += Math.max(0,yardsGiven);
+    state.stats.opp.rushYds += yardsGiven;
     state.yardLine = Math.max(1, state.yardLine - yardsGiven);
     if (yardsGiven >= this.aiToGo) { this.aiDown=1; this.aiToGo=10; Sound.firstDown(); }
     else { this.aiDown++; this.aiToGo=Math.max(1,this.aiToGo-yardsGiven); }
     if (this.aiDown>4) { state.possession='team'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10; }
     state.plays++;
     if (state.plays%8===0) state.quarter=Math.min(4,state.quarter+1);
-    const text = `Tackle! AI +${yardsGiven} yd${yardsGiven!==1?'s':''}`;
-    const result = { text, yards:yardsGiven, td:false, turnover:false };
+    const result = { text:`Stop! AI +${yardsGiven}yd${yardsGiven!==1?'s':''}`, yards:yardsGiven, td:false, turnover:false };
     this.events.emit('playResult', result);
     const hud = this.scene.get('Hud');
     hud?.events?.emit('playResult', result); hud?.events?.emit('possessionChange',state.possession);
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
     } else if (state.possession==='opp') {
-      this.time.delayedCall(1900, ()=>this._startAIDrive());
+      this.time.delayedCall(1800, ()=>this._startAIDrive());
     } else {
-      this.time.delayedCall(1900, ()=>{
+      this.time.delayedCall(1800, ()=>{
         this._resetFormation(); this._drawLines();
         hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
         this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
@@ -688,12 +769,12 @@ export class FieldScene extends Phaser.Scene {
     }
   }
 
-  // ─── TD FLASH ─────────────────────────────────────────────────────────────
-
   _tdFlash(msg, col) {
     const W=this.scale.width, H=this.scale.height;
     const flash = this.add.rectangle(W/2,H/2,W,H, col==='#f59e0b'?0xf59e0b:0xef4444, 0.28).setDepth(50);
-    const txt = this.add.text(W/2,H/2,msg,{fontSize:'42px',fontFamily:'monospace',fontStyle:'bold',color:col,stroke:'#000',strokeThickness:5}).setOrigin(0.5).setDepth(51);
+    const txt = this.add.text(W/2, H/2, msg, {
+      fontSize:'40px', fontFamily:'monospace', fontStyle:'bold', color:col, stroke:'#000', strokeThickness:5
+    }).setOrigin(0.5).setDepth(51);
     this.tweens.add({ targets:[flash,txt], alpha:0, duration:1200, delay:400,
       onComplete:()=>{ flash.destroy(); txt.destroy(); }
     });
@@ -703,10 +784,11 @@ export class FieldScene extends Phaser.Scene {
 
   update(time, delta) {
     const k = this.keys, dp = this._dpadState;
+    const dt = delta / 1000;
 
-    // USER OFFENSE — run phase
+    // USER OFFENSE — run
     if (this.phase === 'run') {
-      const spd = this.runSpd * (delta/1000);
+      const spd = this.runSpd * dt;
       let moved = false;
       if (k.rt.isDown||k.d.isDown||dp.dx>0) { this.runner.x+=spd;       moved=true; }
       if (k.lt.isDown||k.a.isDown||dp.dx<0) { this.runner.x-=spd*0.65;  moved=true; }
@@ -715,7 +797,7 @@ export class FieldScene extends Phaser.Scene {
       if (moved) {
         this.runner.y=clamp(this.runner.y,FIELD_Y+10,FIELD_Y+FIELD_H-10);
         this.ball.x=this.runner.x; this.ball.y=this.runner.y;
-        if (this.runner._lbl){this.runner._lbl.x=this.runner.x;this.runner._lbl.y=this.runner.y;}
+        this._syncLbl(this.runner);
         if (this.runner.x>=FIELD_RIGHT||this.runner.y<=FIELD_Y||this.runner.y>=FIELD_Y+FIELD_H) { this._tackled(); return; }
       }
       this.jukeCD-=delta;
@@ -723,44 +805,40 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
 
-    // AI POSSESSION — user controls defender
+    // AI POSSESSION — user defends
     if (this.phase === 'ai_run') {
-      // AI runner moves LEFT with random drift
-      this._aiJukeCD -= delta;
-      if (Math.random()<0.015) this._aiAngle=(Math.random()-0.5)*0.55;
-      const aispd = this._aiRunSpeed*(delta/1000);
+      this._aiJukeCD-=delta;
+      // AI runner: smooth angle changes for variety
+      if (Math.random()<0.012) this._aiAngle=(Math.random()-0.5)*0.5;
+      const aispd = this._aiRunSpeed*dt;
       this.aiRunner.x -= aispd*Math.cos(this._aiAngle);
       this.aiRunner.y += aispd*Math.sin(this._aiAngle);
       this.aiRunner.y = clamp(this.aiRunner.y,FIELD_Y+10,FIELD_Y+FIELD_H-10);
-      if (this.aiRunner._lbl){this.aiRunner._lbl.x=this.aiRunner.x;this.aiRunner._lbl.y=this.aiRunner.y;}
+      this._syncLbl(this.aiRunner);
       this.ball.x=this.aiRunner.x; this.ball.y=this.aiRunner.y;
 
-      // Occasional AI juke to push away nearby user
+      // Occasional AI juke: push away nearby defender
       if (this._aiJukeCD<=0 && Math.random()<0.003) {
-        this._aiJukeCD=2200;
+        this._aiJukeCD=2400;
         const dx=this.userDef.x-this.aiRunner.x, dy=this.userDef.y-this.aiRunner.y;
         const dist=Math.sqrt(dx*dx+dy*dy);
-        if (dist<72 && dist>0) {
-          const tx=this.userDef.x+(dx/dist)*48, ty=this.userDef.y+(dy/dist)*48;
-          this.tweens.add({ targets:this.userDef, x:tx, y:ty, duration:300,
-            onUpdate:()=>{ if(this.userDef._lbl){this.userDef._lbl.x=this.userDef.x;this.userDef._lbl.y=this.userDef.y;} }
-          });
+        if (dist<75 && dist>0) {
+          this.tweens.add({ targets:this.userDef, x:this.userDef.x+(dx/dist)*46, y:this.userDef.y+(dy/dist)*46, duration:300,
+            onUpdate:()=>this._syncLbl(this.userDef) });
         }
       }
 
       // User defender movement
-      const dspd = this._defSpd*(delta/1000);
+      const dspd = this._defSpd*dt;
       if (k.rt.isDown||k.d.isDown||dp.dx>0) this.userDef.x+=dspd;
       if (k.lt.isDown||k.a.isDown||dp.dx<0) this.userDef.x-=dspd*0.9;
       if (k.up.isDown||k.w.isDown||dp.dy<0) this.userDef.y-=dspd;
       if (k.dn.isDown||k.s.isDown||dp.dy>0) this.userDef.y+=dspd;
       this.userDef.y=clamp(this.userDef.y,FIELD_Y+10,FIELD_Y+FIELD_H-10);
-      if (this.userDef._lbl){this.userDef._lbl.x=this.userDef.x;this.userDef._lbl.y=this.userDef.y;}
+      this._syncLbl(this.userDef);
 
-      // Tackle + TD checks
-      const tdx=this.userDef.x-this.aiRunner.x, tdy=this.userDef.y-this.aiRunner.y;
-      if (Math.sqrt(tdx*tdx+tdy*tdy)<18) { this._userTackle(); return; }
-      if (this.aiRunner.x<=FIELD_LEFT) { this._aiTouchdown(); return; }
+      if (Math.hypot(this.userDef.x-this.aiRunner.x, this.userDef.y-this.aiRunner.y) < 18) { this._userTackle(); return; }
+      if (this.aiRunner.x <= FIELD_LEFT) { this._aiTouchdown(); return; }
     }
   }
 }
