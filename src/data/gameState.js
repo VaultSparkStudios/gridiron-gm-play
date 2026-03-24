@@ -23,7 +23,10 @@ export const state = {
   stats: {
     team: { passYds: 0, rushYds: 0, td: 0, int: 0, fumble: 0 },
     opp:  { passYds: 0, rushYds: 0, td: 0, int: 0, fumble: 0 },
-  }
+  },
+
+  // Per-player stat deltas keyed by player id
+  playerStats: {},
 };
 
 export function resetState() {
@@ -40,6 +43,7 @@ export function resetState() {
     team: { passYds: 0, rushYds: 0, td: 0, int: 0, fumble: 0 },
     opp:  { passYds: 0, rushYds: 0, td: 0, int: 0, fumble: 0 },
   };
+  state.playerStats = {};
 }
 
 export function exportStats() {
@@ -49,13 +53,22 @@ export function exportStats() {
     quarters: state.quarter,
     teamName: state.team?.name,
     oppName: state.opponent?.name,
-    // Per-player deltas — GM reads these to update ss
-    playerDeltas: state.team?.players?.map(p => ({
-      id: p.id, pos: p.pos, name: p.name,
-      passYds: p.pos === 'QB' ? state.stats.team.passYds : 0,
-      rushYds: p.pos === 'RB' ? state.stats.team.rushYds : 0,
-      td: p.pos === 'QB' || p.pos === 'RB' || p.pos === 'WR' ? Math.round(state.stats.team.td / 2) : 0,
-    })) || [],
+    // Per-player deltas — GM reads these to update player season stats
+    playerDeltas: state.team?.players?.map(p => {
+      const ps = state.playerStats[p.id] || {};
+      return {
+        id: p.id, pos: p.pos, name: p.name,
+        passYds: ps.passYds || 0,
+        att:     ps.att     || 0,
+        comp:    ps.comp    || 0,
+        rushYds: ps.rushYds || 0,
+        rushAtt: ps.rushAtt || 0,
+        recYds:  ps.recYds  || 0,
+        rec:     ps.rec     || 0,
+        td:      ps.td      || 0,
+        int:     ps.int     || 0,
+      };
+    }) || [],
   };
   try { localStorage.setItem('gm_game_result', JSON.stringify(out)); } catch {}
   return out;
