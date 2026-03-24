@@ -30,10 +30,17 @@ export const DEFAULT_OPPONENT = {
 };
 
 // Load roster from GM export if available in localStorage
+// P5: Handles full GM export format including coaching schemes
 export function loadRoster() {
   try {
     const raw = localStorage.getItem('gm_roster_export');
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const data = JSON.parse(raw);
+      // Normalize — GM exports {team, opponent} or a raw team object
+      if (data.team && data.opponent) return data;
+      // Single team object from older export format
+      if (data.players) return { team: data, opponent: DEFAULT_OPPONENT };
+    }
   } catch {}
   return { team: DEFAULT_TEAM, opponent: DEFAULT_OPPONENT };
 }

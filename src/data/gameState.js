@@ -43,7 +43,20 @@ export function resetState() {
 }
 
 export function exportStats() {
-  const out = { ...state.stats, score: state.score, quarters: state.quarter };
+  const out = {
+    ...state.stats,
+    score: state.score,
+    quarters: state.quarter,
+    teamName: state.team?.name,
+    oppName: state.opponent?.name,
+    // Per-player deltas — GM reads these to update ss
+    playerDeltas: state.team?.players?.map(p => ({
+      id: p.id, pos: p.pos, name: p.name,
+      passYds: p.pos === 'QB' ? state.stats.team.passYds : 0,
+      rushYds: p.pos === 'RB' ? state.stats.team.rushYds : 0,
+      td: p.pos === 'QB' || p.pos === 'RB' || p.pos === 'WR' ? Math.round(state.stats.team.td / 2) : 0,
+    })) || [],
+  };
   try { localStorage.setItem('gm_game_result', JSON.stringify(out)); } catch {}
   return out;
 }
