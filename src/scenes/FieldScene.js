@@ -27,7 +27,7 @@ export class FieldScene extends Phaser.Scene {
     this.aiDown = 1; this.aiToGo = 10;
     this._lastReceiver = null;
     this._passRushActive = false;
-    this._pocketBeaten = [false, false, false];
+    this._pocketBeaten = [false, false, false, false, false];
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this.time.delayedCall(200, () => {
@@ -70,8 +70,12 @@ export class FieldScene extends Phaser.Scene {
     const oc = Phaser.Display.Color.HexStringToColor(state.opponent?.clr || '#ef4444').color;
     this.qb  = this._dot(tc, 'QB',  14);  this.rb  = this._dot(tc, 'RB',  13);
     this.wr1 = this._dot(tc, 'WR',  10);  this.wr2 = this._dot(tc, 'WR',  10);
-    this.te  = this._dot(tc, 'TE',  12);  this.ol  = this._dot(tc, 'OL',  13);
-    this.offPlayers = [this.qb, this.rb, this.wr1, this.wr2, this.te, this.ol];
+    this.te  = this._dot(tc, 'TE',  12);
+    this.lt  = this._dot(tc, 'LT',  13);  this.lg  = this._dot(tc, 'LG',  13);
+    this.c   = this._dot(tc, 'C',   13);  this.rg  = this._dot(tc, 'RG',  13);
+    this.rt  = this._dot(tc, 'RT',  13);
+    this.oLine = [this.lt, this.lg, this.c, this.rg, this.rt];
+    this.offPlayers = [this.qb, this.rb, this.wr1, this.wr2, this.te, ...this.oLine];
     this.dl  = this._dot(oc, 'DL', 14);  this.dl2 = this._dot(oc, 'DL', 14);
     this.lb  = this._dot(oc, 'LB', 12);  this.lb2 = this._dot(oc, 'LB', 12);
     this.cb1 = this._dot(oc, 'CB', 10);  this.cb2 = this._dot(oc, 'CB', 10);
@@ -136,7 +140,12 @@ export class FieldScene extends Phaser.Scene {
     this._place(this.wr1, lx - 6,  cy - 70);
     this._place(this.wr2, lx - 6,  cy + 70);
     this._place(this.te,  lx - 6,  cy - 34);
-    this._place(this.ol,  lx,      cy);     // OL at the LOS — actual line blocker
+    // 5-man OL: C at center, guards ±14, tackles ±28 (all at LOS)
+    this._place(this.lt,  lx, cy - 28);
+    this._place(this.lg,  lx, cy - 14);
+    this._place(this.c,   lx, cy);
+    this._place(this.rg,  lx, cy + 14);
+    this._place(this.rt,  lx, cy + 28);
 
     this._applySchemeFormation(lx, cy, state.opponent?.dcScheme || '4-3');
     this.ball.x = this.qb.x; this.ball.y = this.qb.y;
@@ -160,7 +169,8 @@ export class FieldScene extends Phaser.Scene {
     this.dl._lbl?.setText('RB'); this.dl2._lbl?.setText('OL');
     this.lb._lbl?.setText('WR'); this.lb2._lbl?.setText('WR');
 
-    this._show(this.ol, false); this._show(this.te, false);
+    this.oLine.forEach(ol => this._show(ol, false));
+    this._show(this.te, false);
     this._show(this.qb, true);  this._show(this.rb, true);
     this._show(this.wr1, true); this._show(this.wr2, true);
     this._place(this.rb,  lx - 15, cy);
@@ -275,39 +285,39 @@ export class FieldScene extends Phaser.Scene {
     this.events.emit('phaseChange', 'run');
   }
 
-  // OL actively interposes between runner and nearest defender
+  // 5-man OL: each lineman blocks assigned defender
   _startOLBlocker() {
     this.time.addEvent({ delay: 16, loop: true, callback: () => {
       if (this.phase !== 'run' && this.phase !== 'run_draw_fake') return;
-
-      // Find the highest-threat defender (closest to runner)
-      let nearestDef = null, nearestDist = 999;
-      this.defPlayers.forEach(d => {
-        if (!d.visible) return;
-        const dist = Math.hypot(d.x - this.runner.x, d.y - this.runner.y);
-        if (dist < nearestDist) { nearestDist = dist; nearestDef = d; }
-      });
-
-      if (nearestDef) {
-        // Position OL midway between runner and nearest defender
-        const tx = (this.runner.x * 0.45 + nearestDef.x * 0.55);
-        const ty = (this.runner.y * 0.45 + nearestDef.y * 0.55);
-        this.ol.x += (tx - this.ol.x) * 0.10;
-        this.ol.y += (ty - this.ol.y) * 0.10;
-        this._syncLbl(this.ol);
-      }
-
-      // Push back any defender within contact range
-      this.defPlayers.forEach(d => {
-        if (!d.visible) return;
-        const dx = d.x - this.ol.x, dy = d.y - this.ol.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 28 && dist > 0) {
-          // Push force scales with overlap
-          const force = (28 - dist) / 28 * 2.6;
-          d.x += (dx/dist)*force; d.y += (dy/dist)*force;
-          this._syncLbl(d);
+      const blocked = new Set();
+      this.oLine.forEach(ol => {
+        if (!ol.visible) return;
+        // Each OL finds nearest unblocked defender
+        let nearestDef = null, nearestDist = 999;
+        this.defPlayers.forEach(d => {
+          if (!d.visible || blocked.has(d)) return;
+          const dist = Math.hypot(d.x - ol.x, d.y - ol.y);
+          if (dist < nearestDist) { nearestDist = dist; nearestDef = d; }
+        });
+        if (nearestDef) {
+          blocked.add(nearestDef);
+          const tx = this.runner.x * 0.4 + nearestDef.x * 0.6;
+          const ty = this.runner.y * 0.4 + nearestDef.y * 0.6;
+          ol.x += (tx - ol.x) * 0.09;
+          ol.y += (ty - ol.y) * 0.09;
+          this._syncLbl(ol);
         }
+        // Push back any defender in contact with this lineman
+        this.defPlayers.forEach(d => {
+          if (!d.visible) return;
+          const dx = d.x - ol.x, dy = d.y - ol.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 28 && dist > 0) {
+            const force = (28 - dist) / 28 * 2.4;
+            d.x += (dx/dist)*force; d.y += (dy/dist)*force;
+            this._syncLbl(d);
+          }
+        });
       });
     }});
   }
@@ -393,16 +403,22 @@ export class FieldScene extends Phaser.Scene {
     this.time.delayedCall(isAction ? 850 : 550, () => this._buildReceiverTargets(isAction));
   }
 
-  // OL + TE + RB form protective pocket around QB before routes develop
+  // 5-man OL forms protective pocket: LT/LG/C/RG/RT arc in front of QB
   _setupPocket() {
-    this._pocketBeaten = [false, false, false];
+    this._pocketBeaten = [false, false, false, false, false];
     const qx = this.qb.x, qy = this.qb.y;
+    // Get individual OL ratings from GM export (fall back to 77)
+    const olPlayers = state.team?.players?.filter(p => ['LT','LG','C','RG','RT'].includes(p.pos)) || [];
+    const getOvr = pos => olPlayers.find(p => p.pos === pos)?.ovr || 77;
     const positions = [
-      { dot: this.ol,  tx: qx + 18, ty: qy - 14 },   // left guard
-      { dot: this.te,  tx: qx + 18, ty: qy + 14 },   // right guard
-      { dot: this.rb,  tx: qx + 8,  ty: qy + 32 },   // RB chip block
+      { dot: this.lt, tx: qx + 24, ty: qy - 22, pos: 'LT' },  // left tackle
+      { dot: this.lg, tx: qx + 18, ty: qy - 10, pos: 'LG' },  // left guard
+      { dot: this.c,  tx: qx + 14, ty: qy,      pos: 'C'  },  // center
+      { dot: this.rg, tx: qx + 18, ty: qy + 10, pos: 'RG' },  // right guard
+      { dot: this.rt, tx: qx + 24, ty: qy + 22, pos: 'RT' },  // right tackle
     ];
-    this._pocketDots = positions.map(p => p.dot);
+    this._pocketDots    = positions.map(p => p.dot);
+    this._pocketOvrs    = positions.map(p => getOvr(p.pos));
     positions.forEach(({ dot, tx, ty }) => {
       this.tweens.add({ targets: dot, x: tx, y: ty, duration: 200,
         onUpdate: () => this._syncLbl(dot) });
@@ -427,11 +443,11 @@ export class FieldScene extends Phaser.Scene {
       const blockedSpd  = pxs(dlData.spd - ri*3, 10, 0.10) / 60;   // crawl while blocked
       const freeSpd     = pxs(dlData.spd - ri*3, 46, 0.52) / 60;   // ~50 px/s when free
 
-      // Pocket blocker assigned to this rusher
-      const blockerIdx = ri % 3;
-
-      // Beat time: 1900ms–3800ms from snap (realistic 2-4 second pocket)
-      const beatMs = 1900 + Math.random() * 1900 + rushDelay;
+      // Pocket blocker assigned to this rusher (up to 5 OL)
+      const blockerIdx = ri % 5;
+      // Beat time scales with OL rating: elite OL holds longer
+      const olOvr = this._pocketOvrs?.[blockerIdx] || 77;
+      const beatMs = 1900 + (olOvr / 99) * 1400 + Math.random() * 800 + rushDelay;
       this.time.delayedCall(beatMs, () => {
         this._pocketBeaten[blockerIdx] = true;
         if (this.phase === 'pass_wait') this.pressureTxt?.setText('PRESSURE!');
@@ -488,7 +504,7 @@ export class FieldScene extends Phaser.Scene {
 
   _clearPassRush() {
     this._passRushActive = false;
-    this._pocketBeaten = [false, false, false];
+    this._pocketBeaten = [false, false, false, false, false];
     this.pressureTxt?.destroy(); this.pressureTxt = null;
   }
 

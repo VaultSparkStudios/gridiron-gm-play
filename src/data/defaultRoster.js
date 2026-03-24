@@ -11,7 +11,11 @@ export const DEFAULT_TEAM = {
     { id: 'wr1', name: 'DeShawn Hill',  pos: 'WR', ovr: 84, spd: 93, str: 58 },
     { id: 'wr2', name: 'Tyrell Banks',  pos: 'WR', ovr: 76, spd: 87, str: 55 },
     { id: 'te1', name: 'Jordan Cole',   pos: 'TE', ovr: 74, spd: 72, str: 80 },
-    { id: 'ol1', name: 'OL Unit',       pos: 'OL', ovr: 77, spd: 55, str: 90 },
+    { id: 'lt1', name: 'Trent Williams', pos: 'LT', ovr: 88, spd: 56, str: 92 },
+    { id: 'lg1', name: 'Quenton Nelson', pos: 'LG', ovr: 85, spd: 54, str: 95 },
+    { id: 'c1',  name: 'Garrett Bradbury', pos: 'C', ovr: 78, spd: 55, str: 88 },
+    { id: 'rg1', name: 'Penei Sewell',   pos: 'RG', ovr: 83, spd: 57, str: 91 },
+    { id: 'rt1', name: 'Rashawn Slater', pos: 'RT', ovr: 84, spd: 56, str: 90 },
   ]
 };
 
