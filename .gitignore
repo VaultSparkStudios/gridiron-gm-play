@@ -1,5 +1,6 @@
-# Logs
+# Logs (allow Studio OS work log)
 logs
+!logs/WORK_LOG.md
 *.log
 npm-debug.log*
 yarn-debug.log*

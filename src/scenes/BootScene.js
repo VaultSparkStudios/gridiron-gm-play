@@ -49,9 +49,40 @@ export class BootScene extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
+    // Key matchup card
+    const tPlayers = team.players     || [];
+    const oPlayers = opponent.players || [];
+    const tLT  = tPlayers.find(p => p.pos === 'LT') || tPlayers.find(p => ['LT','LG','C','RG','RT'].includes(p.pos));
+    const oDE  = oPlayers.reduce((best, p) => (p.pos === 'DL' && (!best || p.ovr > best.ovr)) ? p : best, null);
+    const tQB  = tPlayers.find(p => p.pos === 'QB');
+    const oCB  = oPlayers.reduce((best, p) => (p.pos === 'CB' && (!best || p.ovr > best.ovr)) ? p : best, null);
+
+    const matchups = [];
+    if (tLT && oDE)  matchups.push({ label: 'LT vs DE', home: tLT.name  || 'LT',  homeOvr: tLT.ovr,  away: oDE.name  || 'DE',  awayOvr: oDE.ovr });
+    if (tQB && oCB)  matchups.push({ label: 'QB vs CB', home: tQB.name  || 'QB',  homeOvr: tQB.ovr,  away: oCB.name  || 'CB',  awayOvr: oCB.ovr });
+
+    if (matchups.length) {
+      const mx = W/2, my = H/2 + 42;
+      this.add.text(mx, my, 'KEY MATCHUPS', {
+        fontSize:'7px', fontFamily:'monospace', fontStyle:'bold', color:'#334155', letterSpacing:3
+      }).setOrigin(0.5);
+      matchups.forEach(({ label, home, homeOvr, away, awayOvr }, i) => {
+        const y = my + 11 + i * 14;
+        const adv = homeOvr >= awayOvr ? '#22c55e' : '#ef4444';
+        const homeShort = home.split(' ').pop();
+        const awayShort = away.split(' ').pop();
+        this.add.text(mx, y, `${homeShort} (${homeOvr})  vs  ${awayShort} (${awayOvr})`, {
+          fontSize:'8px', fontFamily:'monospace', color:'#64748b'
+        }).setOrigin(0.5);
+        this.add.text(mx + 94, y, homeOvr >= awayOvr ? '▲' : '▼', {
+          fontSize:'9px', fontFamily:'monospace', color: adv
+        }).setOrigin(0.5);
+      });
+    }
+
     // Kick Off button
-    const btn = this.add.rectangle(W/2, H/2 + 74, 210, 46, 0x22c55e).setInteractive({ useHandCursor:true });
-    this.add.text(W/2, H/2 + 74, 'KICK OFF', {
+    const btn = this.add.rectangle(W/2, H/2 + 100, 210, 46, 0x22c55e).setInteractive({ useHandCursor:true });
+    this.add.text(W/2, H/2 + 100, 'KICK OFF', {
       fontSize:'16px', fontFamily:'monospace', fontStyle:'bold', color:'#fff'
     }).setOrigin(0.5);
     btn.on('pointerover', ()=>btn.setFillStyle(0x16a34a));
