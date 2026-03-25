@@ -33,9 +33,14 @@ export class FieldScene extends Phaser.Scene {
     this._pocketBeaten = [false, false, false, false, false];
     this._passRushMode = false; this._passRushCoverBreak = false; this._blitzBtn = null; this._rushThrowTimer = null;
     this._noHuddleActive = false; this._fadeEls = null; this._trickEls = null;
+    // P36-P43 flags
+    this._spinUsed = false; this._challengeUsed = false; this._comebackMode = false;
+    this._momentum = 50; this._momentumBar = null; this._momentumText = null;
+    this._prePlayState = null;
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
+    this._buildMomentumHUD();
     this.time.delayedCall(400, () => this._startKickoffReturn());
   }
 
@@ -202,6 +207,7 @@ export class FieldScene extends Phaser.Scene {
     this.ball.x = this.qb.x; this.ball.y = this.qb.y;
     this.phase = 'presnap';
     this.jukeCD = 0;
+    this._spinUsed = false; // P38: reset per play
     this._clearPassRush();
     this._drawLines();
     this._clearArc();
@@ -312,18 +318,26 @@ export class FieldScene extends Phaser.Scene {
 
   _onPlayCalled(callId) {
     state.currentCall = callId;
-    // P17: False start ~4% (offensive penalty, -5 yards, no play)
-    if (this.phase === 'presnap' && callId !== 'punt' && callId !== 'fg' && Math.random() < 0.04) {
+    // P42: save pre-play state for challenge flag
+    this._savePrePlayState();
+    // P17: False start ~4% (offensive penalty, -5 yards, no play); P43: +5% AI false start in comeback mode
+    const falseStartCh = 0.04; // base chance — comebackMode would increase OPPONENT's false starts, but we just log ours
+    if (this.phase === 'presnap' && callId !== 'punt' && callId !== 'fg' && Math.random() < falseStartCh) {
       this.phase = 'result'; Sound.whistle();
       this._tdFlash('FALSE START — 5 yds', '#f59e0b');
       this._endPlay({ yards:-5, text:'FLAG — False Start. 5-yard penalty.', type:'penalty', turnover:false, td:false });
       return;
     }
-    if      (callId === 'punt')                              this._doPunt();
-    else if (callId === 'fg')                                this._attemptFG();
+    if      (callId === 'punt')                              this._showFakePuntOption();
+    else if (callId === 'fg')                                this._showFakeFGOption();
     else if (callId.startsWith('run_') || callId === 'scramble') {
-      if (callId.startsWith('run_') && !this._noHuddleActive && Math.random() < 0.15) this._showTrickOption(callId);
-      else this._startRun(callId);
+      if (callId.startsWith('run_') && state.toGo<=1 && state.yardLine>=94) {
+        this._tryGoalLineSneak(()=>{ if(!this._noHuddleActive&&Math.random()<0.15)this._showTrickOption(callId);else this._startRun(callId); });
+      } else if (callId.startsWith('run_') && !this._noHuddleActive && Math.random() < 0.15) {
+        this._showTrickOption(callId);
+      } else {
+        this._startRun(callId);
+      }
     }
     else if (callId === 'screen_pass')                                    this._startScreenPass();
     else if (callId === 'pass_action')                                    this._startPlayAction();
@@ -819,6 +833,43 @@ export class FieldScene extends Phaser.Scene {
     this._passRushActive = false;
     this._pocketBeaten = [false, false, false, false, false];
     this.pressureTxt?.destroy(); this.pressureTxt = null;
+    this._spinBtn?.destroy(); this._spinBtn = null; this._spinBtnTxt?.destroy(); this._spinBtnTxt = null;
+  }
+
+  // P38: QB Scramble Spin Move — show SPIN button when DL within 40px during pass_wait
+  _checkSpinButton() {
+    if (this._spinUsed || this.phase !== 'pass_wait') return;
+    const dist = Math.hypot(this.dl.x - this.qb.x, this.dl.y - this.qb.y);
+    if (dist < 40 && !this._spinBtn) {
+      const W = this.scale.width;
+      this._spinBtn = this.add.rectangle(W/2, FIELD_Y + FIELD_H + 22, 80, 26, 0xf97316).setDepth(21).setInteractive({useHandCursor:true});
+      this._spinBtnTxt = this.add.text(W/2, FIELD_Y + FIELD_H + 22, '🌀 SPIN', {fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(22);
+      this._spinBtn.once('pointerdown', () => this._doSpin());
+    } else if (dist >= 40 && this._spinBtn) {
+      this._spinBtn?.destroy(); this._spinBtn = null;
+      this._spinBtnTxt?.destroy(); this._spinBtnTxt = null;
+    }
+  }
+
+  _doSpin() {
+    if (this._spinUsed || this.phase !== 'pass_wait') return;
+    this._spinUsed = true;
+    this._spinBtn?.destroy(); this._spinBtn = null;
+    this._spinBtnTxt?.destroy(); this._spinBtnTxt = null;
+    const success = Math.random() < 0.70;
+    if (success) {
+      this._tdFlash('SPIN MOVE! 🌀', '#3b82f6');
+      // Push DL away from QB
+      const dx = this.qb.x - this.dl.x, dy = this.qb.y - this.dl.y, dist = Math.hypot(dx, dy);
+      if (dist > 0) this.tweens.add({ targets: this.dl, x: this.dl.x - (dx/dist)*55, y: this.dl.y - (dy/dist)*55, duration: 400, onUpdate: () => this._syncLbl(this.dl) });
+      // Buy extra 1.2s of pocket time — delay all beatenMs by re-clearing pocket
+      this._pocketBeaten = [false, false, false, false, false];
+      this.time.delayedCall(1200, () => { if (this.phase === 'pass_wait') this._pocketBeaten = [true, true, true, true, true]; });
+    } else {
+      this._tdFlash('SPIN MISSED! 💨', '#ef4444');
+      // DL breaks through faster
+      this.time.delayedCall(200, () => { if (this.phase === 'pass_wait') this._sack(); });
+    }
   }
 
   _sack() {
@@ -974,7 +1025,10 @@ export class FieldScene extends Phaser.Scene {
         const isDeep = variant==='deep' || variant==='action';
         const intCh  = isDeep ? 0.11 : 0.04;
         const wxPassM = state.weather==='snow'?0.80:state.weather==='rain'?0.86:1;
-        const compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002)*wxPassM, 0.22, 0.88);
+        // P41: momentum bonus to completion; P43: comeback mode +5% WR speed approximated as +3% comp
+        const momBonus=(this._momentum-50)*0.0008;
+        const cbBonus=this._comebackMode?0.03:0;
+        const compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus)*wxPassM, 0.22, 0.88);
         if (type==='covered' && Math.random()<intCh*2) {
           Sound.int(); state.stats.team.int++;
           this._track(qb.id,'int',1);
@@ -1022,6 +1076,13 @@ export class FieldScene extends Phaser.Scene {
       this._lastReceiver = null;
     }
 
+    // P41: update momentum on play result
+    if(td) this._updateMomentum(15);
+    else if(yards>=(state.toGo||10)) this._updateMomentum(8);
+    else if(yards>0) this._updateMomentum(3);
+    else this._updateMomentum(-6);
+    // P43: check comeback mode each play
+    this._checkComebackMode();
     const text = td ? `🏈 TOUCHDOWN! +${yards} yds!` : `${yards>0?'+':''}${yards} yards`;
     this._endPlay({ yards:yards||0, text, type:td?'td':(isRun?'run':'pass'), turnover:false, td });
   }
@@ -1056,10 +1117,16 @@ export class FieldScene extends Phaser.Scene {
     if (driveEnd) { state.drives.push({...state.currentDrive, result:driveEnd}); state.currentDrive={poss:state.possession,plays:0,yards:0,start:state.yardLine}; }
     state.plays++;
     if (state.plays%8===0) state.quarter=Math.min(4,state.quarter+1);
+    // P41: momentum drain on turnover
+    if(result.turnover) this._updateMomentum(-12);
     this.events.emit('playResult', result);
     const hud = this.scene.get('Hud');
     hud?.events?.emit('playResult', result);
     hud?.events?.emit('possessionChange', state.possession);
+    // P42: offer challenge on turnovers (INT/fumble) if not yet used
+    if(!this._challengeUsed && result.turnover && (result.type==='int'||result.type==='fumble')) {
+      this.time.delayedCall(600, ()=>this._showChallengeOption());
+    }
     this._afterPlay();
   }
 
@@ -1273,6 +1340,14 @@ export class FieldScene extends Phaser.Scene {
   }
 
   _launchAIDrive() {
+    // P43: comeback mode — AI gets +5% false start chance
+    if(this._comebackMode && Math.random()<0.05){
+      const W=this.scale.width;
+      const fsT=this.add.text(W/2,FIELD_Y+30,'⚠️ AI FALSE START — 5 yards!',{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(20);
+      this.time.delayedCall(1400,()=>{fsT?.destroy();});
+      state.yardLine=Math.max(1,state.yardLine+5);
+      this._drawLines();
+    }
     const call = this._defCall || 'cover2';
     if (call === 'man')          { this._defSpd *= 1.22; this._aiRunSpeed *= 1.06; }
     else if (call === 'blitz')   { this._aiRunSpeed *= 1.12; this._launchBlitzPursuer(); }
@@ -1375,7 +1450,9 @@ export class FieldScene extends Phaser.Scene {
       Sound.int();
       state.stats.team.int=(state.stats.team.int||0)+1;
       this._tdFlash('INTERCEPTED! 🏈','#22c55e');
-      this.aiDown=4; this._resolveAIPlay(0); return;
+      // P36: Pick-six return mini-game
+      this._launchPickSixReturn(rec.dot);
+      return;
     }
     const wrD=(state.opponent?.players||[]).find(p=>p.pos==='WR')||{ovr:78};
     const cbD=(state.team?.players||[]).find(p=>['CB','S'].includes(p.pos))||{ovr:75};
@@ -1489,6 +1566,62 @@ export class FieldScene extends Phaser.Scene {
       this.time.delayedCall(2000, ()=>this.scene.start('GameOver'));
     } else {
       this.time.delayedCall(2400, ()=>this._startKickoffReturn());
+    }
+  }
+
+  // ─── P36: PICK-SIX RETURN ────────────────────────────────────────────────
+
+  _launchPickSixReturn(intDot) {
+    const cy = FIELD_Y + FIELD_H / 2;
+    const W = this.scale.width;
+    [...this.offPlayers, ...this.defPlayers].forEach(d => this._show(d, false));
+    // DB runs from interception spot toward opponent endzone (left side)
+    const dbData = state.team?.players?.find(p=>['CB','S'].includes(p.pos)) || {spd:82};
+    this._pickSixDot = this.lb;
+    this._place(this.lb, intDot.x, intDot.y);
+    this.lb._lbl?.setText('DB');
+    this._show(this.lb, true);
+    this._pickSixSpd = pxs(dbData.spd, 78, 0.95);
+    // AI tackler (QB) chases from behind
+    this._show(this.dl, true);
+    this._place(this.dl, intDot.x + 60, cy + Phaser.Math.Between(-30, 30));
+    this.dl._lbl?.setText('QB');
+    this._pickSixTackler = this.dl;
+    this._pickSixTacklerSpd = pxs(72, 55, 0.7);
+    this.ball.x = this.lb.x; this.ball.y = this.lb.y;
+    this.phase = 'pick_six_return';
+    const banner = this.add.text(W/2, FIELD_Y - 20, '🏈 PICK-SIX! RUN IT BACK! WASD', {
+      fontSize:'13px', fontFamily:'monospace', fontStyle:'bold', color:'#22c55e', stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5).setDepth(20);
+    this.time.delayedCall(5000, () => { if (this.phase === 'pick_six_return') this._resolvePickSixReturn(false); banner?.destroy(); });
+    const hud = this.scene.get('Hud');
+    hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
+    this.events.emit('phaseChange','pick_six_return');
+  }
+
+  _resolvePickSixReturn(scoredTD) {
+    if (this.phase !== 'pick_six_return') return;
+    this.phase = 'result';
+    this._show(this.lb, false); this._show(this.dl, false);
+    if (scoredTD) {
+      Sound.td(); state.score.team += 6; state.stats.team.td++;
+      this._tdFlash('PICK SIX! 🏈 +6', '#22c55e');
+      state.possession='team'; state.yardLine=25; state.down=1; state.toGo=10;
+      const result = {text:'PICK SIX! DB returns INT for TD!',td:true,yards:0,turnover:false};
+      this.events.emit('playResult',result);
+      const hud=this.scene.get('Hud');
+      hud?.events?.emit('playResult',result); hud?.events?.emit('possessionChange','team');
+      this.time.delayedCall(2200,()=>this._showPATChoice());
+    } else {
+      // Tackled — DB tackled during return, team gets ball at current position
+      const returnYd = Math.max(0, Math.round((yardToX(state.yardLine) - this.lb.x) / YARD_W));
+      const newYard = Math.min(99, state.yardLine + returnYd);
+      state.possession='team'; state.yardLine=newYard; state.down=1; state.toGo=10;
+      const result={text:`INT return! ${returnYd} yards. Team ball at yd ${newYard}.`,yards:returnYd,td:false,turnover:false};
+      this.events.emit('playResult',result);
+      const hud=this.scene.get('Hud');
+      hud?.events?.emit('playResult',result); hud?.events?.emit('possessionChange','team');
+      this.time.delayedCall(1800,()=>{ this._resetFormation(); this._drawLines(); hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team'); this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall'); });
     }
   }
 
@@ -1632,32 +1765,47 @@ export class FieldScene extends Phaser.Scene {
     mkBtn(W/2+95,H/2+10,'ONSIDE','~15% recovery chance',0xf59e0b,()=>this._resolveOnsideKick());
   }
 
-  // P21: Resolve onside kick attempt
+  // P21: Resolve onside kick attempt — P37 enhanced with rapid-tap mechanic
   _resolveOnsideKick() {
-    // Recovery chance: base 15%, improves slightly with ST OVR
+    const W = this.scale.width, H = this.scale.height;
     const stOvr = state.team?.players?.filter(p=>p.pos==='K').reduce((s,p,_,a)=>s+p.ovr/a.length,0)||70;
-    const recoverCh = Math.min(0.28, 0.10 + (stOvr-60)*0.002);
-    const recovered = Math.random() < recoverCh;
-    Sound.whistle();
-    if (recovered) {
-      // User team recovers — start at ~50 yard line
-      state.possession='team'; state.yardLine=50; state.down=1; state.toGo=10;
-      this._tdFlash('ONSIDE RECOVERED! 🎉','#f59e0b');
-      this.time.delayedCall(1800,()=>{
-        this._resetFormation(); this._drawLines();
-        const hud=this.scene.get('Hud');
-        hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
-        this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
-      });
-    } else {
-      // Opponent recovers at ~45 yard line
-      state.possession='opp'; state.yardLine=Math.max(40,100-45); state.down=1; state.toGo=10;
-      this._tdFlash('ONSIDE FAILED','#ef4444');
-      this.time.delayedCall(1800,()=>{
-        if(state.quarter>4||state.plays>=40){this.scene.start('GameOver');return;}
-        this._startAIDrive();
-      });
-    }
+    const baseRecoverCh = Math.min(0.28, 0.10 + (stOvr-60)*0.002);
+    let taps = 0; const els = [];
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(60));
+    els.push(this.add.text(W/2,H/2-60,'ONSIDE KICK! TAP FAST!',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
+    const ctr = this.add.text(W/2,H/2-28,'0 / 3 taps to recover',{fontSize:'12px',fontFamily:'monospace',color:'#fef08a'}).setOrigin(0.5).setDepth(61);
+    els.push(ctr);
+    const tapBtn = this.add.rectangle(W/2,H/2+20,180,60,0xf59e0b).setDepth(61).setInteractive({useHandCursor:true});
+    const tapTx = this.add.text(W/2,H/2+20,'TAP!',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#000'}).setOrigin(0.5).setDepth(62);
+    els.push(tapBtn,tapTx);
+    tapBtn.on('pointerdown',()=>{ taps++; ctr.setText(`${taps} / 3 taps`); tapBtn.setScale(0.9); this.time.delayedCall(80,()=>tapBtn.setScale(1)); });
+    const cdEl = this.add.text(W/2,H/2+68,'1.5s',{fontSize:'10px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);
+    els.push(cdEl);
+    let rem = 1500; const tick = ()=>{rem-=200;if(rem<=0){resolve();return;} cdEl.setText((rem/1000).toFixed(1)+'s'); this._onsideTimer=setTimeout(tick,200);};
+    const resolve = () => {
+      els.forEach(e=>e?.destroy?.()); clearTimeout(this._onsideTimer);
+      const tapBonus = taps >= 3 ? 0.20 : taps >= 1 ? 0.08 : 0;
+      const recovered = Math.random() < (baseRecoverCh + tapBonus);
+      Sound.whistle();
+      if (recovered) {
+        state.possession='team'; state.yardLine=50; state.down=1; state.toGo=10;
+        this._tdFlash('ONSIDE RECOVERED! 🎉','#f59e0b');
+        this.time.delayedCall(1800,()=>{
+          this._resetFormation(); this._drawLines();
+          const hud=this.scene.get('Hud');
+          hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
+          this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
+        });
+      } else {
+        state.possession='opp'; state.yardLine=Math.max(40,100-45); state.down=1; state.toGo=10;
+        this._tdFlash('ONSIDE FAILED','#ef4444');
+        this.time.delayedCall(1800,()=>{
+          if(state.quarter>4||state.plays>=40){this.scene.start('GameOver');return;}
+          this._startAIDrive();
+        });
+      }
+    };
+    this._onsideTimer = setTimeout(tick, 200);
   }
 
   // AI returns kickoff (after user TD or FG)
@@ -1667,9 +1815,174 @@ export class FieldScene extends Phaser.Scene {
     this._showKickoffFlash('KICKOFF','WASD to cover  •  tackle the returner',()=>this._startAIDrive());
   }
 
+  // ─── P39: FAKE PUNT / FAKE FG ────────────────────────────────────────────
+
+  _showFakePuntOption() {
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const cleanup=()=>{els.forEach(e=>e?.destroy?.());clearTimeout(this._fakePuntTimer);};
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(60));
+    els.push(this.add.text(W/2,H/2-60,'4th DOWN — PUNT OR FAKE?',{fontSize:'16px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
+    const mkBtn=(cx,cy,label,sub,hx,cb)=>{
+      const b=this.add.rectangle(cx,cy,160,60,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
+      const l=this.add.text(cx,cy-10,label,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);
+      const s=this.add.text(cx,cy+10,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);
+      b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{cleanup();cb();});
+      els.push(b,l,s);
+    };
+    mkBtn(W/2-90,H/2+14,'PUNT IT','Safe — give up the ball',0x64748b,()=>this._doPunt());
+    mkBtn(W/2+90,H/2+14,'🎭 FAKE IT!','Risky — pass or run',0xf97316,()=>this._doFakePunt());
+    const cdEl=this.add.text(W/2,H/2+68,'Auto: 3s',{fontSize:'9px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);
+    els.push(cdEl);
+    let rem=3000;const tick=()=>{rem-=200;if(rem<=0){cleanup();this._doPunt();return;} cdEl.setText('Auto: '+(rem/1000).toFixed(1)+'s');this._fakePuntTimer=setTimeout(tick,200);};
+    this._fakePuntTimer=setTimeout(tick,200);
+  }
+
+  _doFakePunt() {
+    this.phase='result'; Sound.whistle();
+    this._tdFlash('🎭 FAKE PUNT!','#f97316');
+    const qbOvr=(state.team?.players||[]).find(p=>p.pos==='QB')?.ovr||75;
+    const roll=Math.random();
+    const success=roll<Math.min(0.62,0.40+(qbOvr-70)*0.004);
+    if(success){ const yds=Phaser.Math.Between(state.toGo,state.toGo+12); this._endPlay({yards:yds,text:`FAKE PUNT works! +${yds} yards — 1st down!`,type:'run',turnover:false,td:state.yardLine+yds>=100}); }
+    else { this._endPlay({yards:0,text:'FAKE PUNT sniffed out! Turnover on downs.',type:'punt',turnover:true,td:false}); }
+  }
+
+  _showFakeFGOption() {
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const cleanup=()=>{els.forEach(e=>e?.destroy?.());clearTimeout(this._fakeFGTimer);};
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(60));
+    els.push(this.add.text(W/2,H/2-60,'FIELD GOAL — REAL OR FAKE?',{fontSize:'16px',fontFamily:'monospace',fontStyle:'bold',color:'#eab308',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
+    const mkBtn=(cx,cy,label,sub,hx,cb)=>{
+      const b=this.add.rectangle(cx,cy,160,60,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
+      const l=this.add.text(cx,cy-10,label,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);
+      const s=this.add.text(cx,cy+10,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);
+      b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{cleanup();cb();});
+      els.push(b,l,s);
+    };
+    mkBtn(W/2-90,H/2+14,'REAL KICK','Attempt the FG',0x22c55e,()=>this._attemptFG());
+    mkBtn(W/2+90,H/2+14,'🎭 FAKE IT!','Pass or run attempt',0xf97316,()=>this._doFakeFG());
+    const cdEl=this.add.text(W/2,H/2+68,'Auto: 3s',{fontSize:'9px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);
+    els.push(cdEl);
+    let rem=3000;const tick=()=>{rem-=200;if(rem<=0){cleanup();this._attemptFG();return;} cdEl.setText('Auto: '+(rem/1000).toFixed(1)+'s');this._fakeFGTimer=setTimeout(tick,200);};
+    this._fakeFGTimer=setTimeout(tick,200);
+  }
+
+  _doFakeFG() {
+    this.phase='result'; Sound.whistle();
+    this._tdFlash('🎭 FAKE FG!','#f97316');
+    const wrOvr=(state.team?.players||[]).find(p=>p.pos==='WR')?.ovr||75;
+    const roll=Math.random();
+    const success=roll<Math.min(0.55,0.38+(wrOvr-70)*0.003);
+    if(success){ const yds=Phaser.Math.Between(state.toGo,state.toGo+15); const td=state.yardLine+yds>=100; if(td)this._tdFlash('FAKE FG TOUCHDOWN! 🎭','#f97316'); this._endPlay({yards:yds,text:`FAKE FG works! +${yds} yards${td?' — TOUCHDOWN!':''}`,type:td?'td':'pass',turnover:false,td}); }
+    else { this._endPlay({yards:0,text:'FAKE FG exposed! Turnover on downs.',type:'fg_miss',turnover:true,td:false}); }
+  }
+
+  // ─── P40: GOAL LINE QB SNEAK ──────────────────────────────────────────────
+
+  _tryGoalLineSneak(onSkip) {
+    if(state.toGo>1||state.yardLine<94){onSkip();return;}
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const cleanup=()=>els.forEach(e=>e?.destroy?.());
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(60));
+    els.push(this.add.text(W/2,H/2-60,'QB SNEAK — MASH!',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
+    let taps=0; const needed=4;
+    const ctr=this.add.text(W/2,H/2-22,`0 / ${needed}`,{fontSize:'14px',fontFamily:'monospace',color:'#fef08a'}).setOrigin(0.5).setDepth(61);
+    els.push(ctr);
+    const bar=this.add.rectangle(W/2,H/2+12,0,14,0x22c55e).setDepth(61);
+    const barBg=this.add.rectangle(W/2,H/2+12,200,14,0x1e293b).setDepth(60).setStrokeStyle(1,0x334155);
+    els.push(barBg,bar);
+    const btn=this.add.rectangle(W/2,H/2+52,180,46,0x16a34a).setDepth(61).setInteractive({useHandCursor:true});
+    const btx=this.add.text(W/2,H/2+52,'TAP! TAP! TAP!',{fontSize:'14px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(62);
+    els.push(btn,btx);
+    btn.on('pointerdown',()=>{ taps++; ctr.setText(`${taps} / ${needed}`); bar.width=Math.min(200,(taps/needed)*200); btn.setScale(0.93); this.time.delayedCall(60,()=>btn.setScale(1)); });
+    this.time.delayedCall(800,()=>{
+      cleanup();
+      const qbStr=(state.team?.players||[]).find(p=>p.pos==='QB')?.str||65;
+      const success=taps>=needed&&Math.random()<clamp(0.50+(qbStr-65)*0.005,0.35,0.75);
+      const sneakYds=state.toGo||1;const sneakTD=state.yardLine+sneakYds>=100;
+      if(success){ Sound.td?.(); this._tdFlash('SNEAK FOR THE TD! 💪','#22c55e'); this._endPlay({yards:sneakYds,text:sneakTD?'QB SNEAK — TOUCHDOWN!':'QB sneak — 1st down!',type:sneakTD?'td':'run',turnover:false,td:sneakTD}); }
+      else if(taps>=needed){ this._endPlay({yards:1,text:'QB sneak — just enough for the 1st!',type:'run',turnover:false,td:false}); }
+      else { this._endPlay({yards:0,text:'QB sneak stuffed at the line.',type:'run',turnover:false,td:false}); }
+    });
+  }
+
+  // ─── P41: DRIVE MOMENTUM METER ────────────────────────────────────────────
+
+  _buildMomentumHUD() {
+    const W=this.scale.width;
+    this._momentumText = this.add.text(W/2, FIELD_Y - 36, '⚡ MOM', {fontSize:'8px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(15);
+    const barW=100, barX=W/2-barW/2, barY=FIELD_Y-26;
+    this.add.rectangle(W/2, barY, barW, 8, 0x1e293b).setDepth(14);
+    this._momentumBar = this.add.rectangle(barX + (this._momentum/100)*barW/2, barY, (this._momentum/100)*barW, 8, 0x22c55e).setDepth(15).setOrigin(0,0.5);
+    this._momentumBar.x = barX;
+  }
+
+  _updateMomentum(delta) {
+    this._momentum = clamp(this._momentum + delta, 0, 100);
+    const W=this.scale.width, barW=100, barX=W/2-barW/2;
+    if(this._momentumBar){ this._momentumBar.width = (this._momentum/100)*barW; }
+    const col = this._momentum>65?0x22c55e:this._momentum>35?0xeab308:0xef4444;
+    if(this._momentumBar) this._momentumBar.fillColor=col;
+    if(this._momentumText) this._momentumText.setText(`⚡ ${Math.round(this._momentum)}%`);
+  }
+
+  // ─── P42: CHALLENGE FLAG ─────────────────────────────────────────────────
+
+  _savePrePlayState() {
+    this._prePlayState = { yardLine:state.yardLine, down:state.down, toGo:state.toGo, possession:state.possession, scoreTeam:state.score.team, scoreOpp:state.score.opp };
+  }
+
+  _showChallengeOption() {
+    if(this._challengeUsed||!this._prePlayState)return;
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const cleanup=()=>{els.forEach(e=>e?.destroy?.());clearTimeout(this._chalTimer);};
+    els.push(this.add.rectangle(W/2,FIELD_Y+FIELD_H/2-30,300,82,0x0d1424,0.94).setDepth(58).setStrokeStyle(1,0xef4444,0.8));
+    els.push(this.add.text(W/2,FIELD_Y+FIELD_H/2-56,'🚩 CHALLENGE? (1 per game)',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#ef4444'}).setOrigin(0.5).setDepth(59));
+    const mkBtn=(cx,label,hx,cb)=>{
+      const b=this.add.rectangle(cx,FIELD_Y+FIELD_H/2-20,120,34,0x0d1424).setDepth(59).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
+      const l=this.add.text(cx,FIELD_Y+FIELD_H/2-20,label,{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(60);
+      b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{cleanup();cb();});
+      els.push(b,l);
+    };
+    mkBtn(W/2-72,'🚩 THROW FLAG',0xef4444,()=>{
+      this._challengeUsed=true;
+      const overturned=Math.random()<0.45;
+      if(overturned){
+        Object.assign(state,{yardLine:this._prePlayState.yardLine,down:this._prePlayState.down,toGo:this._prePlayState.toGo,possession:this._prePlayState.possession});
+        state.score.team=this._prePlayState.scoreTeam; state.score.opp=this._prePlayState.scoreOpp;
+        this._tdFlash('CHALLENGE: OVERTURNED! ✅','#22c55e');
+        this.time.delayedCall(2000,()=>{ this._resetFormation(); this._drawLines(); const hud=this.scene.get('Hud'); hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange',state.possession); this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall'); });
+      } else {
+        this._tdFlash('CHALLENGE FAILED — STANDS 🚩','#ef4444');
+      }
+    });
+    mkBtn(W/2+72,'NO CHALLENGE',0x334155,()=>cleanup());
+    let rem=4000;const tick=()=>{rem-=200;if(rem<=0){cleanup();return;} this._chalTimer=setTimeout(tick,200);};
+    this._chalTimer=setTimeout(tick,200);
+  }
+
+  // ─── P43: 4TH QUARTER COMEBACK MODE ──────────────────────────────────────
+
+  _checkComebackMode() {
+    const wasActive=this._comebackMode;
+    this._comebackMode = state.quarter>=4 && (state.score.opp-state.score.team)>=7;
+    if(this._comebackMode&&!wasActive){
+      const W=this.scale.width;
+      const cb=this.add.text(W/2,FIELD_Y+FIELD_H/2,'⚡ COMEBACK MODE',{fontSize:'16px',fontFamily:'monospace',fontStyle:'bold',color:'#3b82f6',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(20);
+      this.tweens.add({targets:cb,alpha:0,y:cb.y-30,duration:2000,onComplete:()=>cb.destroy()});
+    }
+  }
+
   _tdFlash(msg, col) {
     const W=this.scale.width, H=this.scale.height;
-    const colMap={'#f59e0b':0xf59e0b,'#22c55e':0x22c55e,'#3b82f6':0x3b82f6,'#ef4444':0xef4444};
+    const colMap={'#f59e0b':0xf59e0b,'#22c55e':0x22c55e,'#3b82f6':0x3b82f6,'#ef4444':0xef4444,'#f97316':0xf97316,'#a78bfa':0xa78bfa,'#eab308':0xeab308};
     const flash = this.add.rectangle(W/2,H/2,W,H, colMap[col]??0xef4444, 0.28).setDepth(50);
     const txt = this.add.text(W/2, H/2, msg, {
       fontSize:'40px', fontFamily:'monospace', fontStyle:'bold', color:col, stroke:'#000', strokeThickness:5
@@ -1929,6 +2242,32 @@ export class FieldScene extends Phaser.Scene {
 
     // P28: FADE ROUTE — catch handled by button tap
     if (this.phase === 'fade_route') { /* catch handled by button */ }
+
+    // P38: check spin button during pass_wait
+    if (this.phase === 'pass_wait') this._checkSpinButton();
+
+    // P36: pick_six_return — DB runs to opponent endzone, WASD control
+    if (this.phase === 'pick_six_return') {
+      const spd = this._pickSixSpd * dt;
+      if (k.rt.isDown||k.d.isDown||dp.dx>0) this._pickSixDot.x -= spd;
+      if (k.lt.isDown||k.a.isDown||dp.dx<0) this._pickSixDot.x += spd * 0.65;
+      if (k.up.isDown||k.w.isDown||dp.dy<0) this._pickSixDot.y -= spd;
+      if (k.dn.isDown||k.s.isDown||dp.dy>0) this._pickSixDot.y += spd;
+      this._pickSixDot.y = clamp(this._pickSixDot.y, FIELD_Y+10, FIELD_Y+FIELD_H-10);
+      this.ball.x = this._pickSixDot.x; this.ball.y = this._pickSixDot.y;
+      this._syncLbl(this._pickSixDot);
+      // AI tackler chases
+      if (this._pickSixTackler) {
+        const dx=this._pickSixDot.x-this._pickSixTackler.x, dy=this._pickSixDot.y-this._pickSixTackler.y, dist=Math.hypot(dx,dy);
+        if(dist>4){ const ts=this._pickSixTacklerSpd*dt; this._pickSixTackler.x+=(dx/dist)*ts; this._pickSixTackler.y+=(dy/dist)*ts; this._syncLbl(this._pickSixTackler); }
+        if(dist<14){ this._resolvePickSixReturn(false); return; }
+      }
+      // Reaches opponent endzone (left side = user defends right, INT runner goes left)
+      if (this._pickSixDot.x <= FIELD_LEFT) { this._resolvePickSixReturn(true); return; }
+    }
+
+    // P43: 4th Quarter Comeback Mode — speed boost for WRs (applied via _comebackMode flag in pass logic)
+    // (flags are checked in _buildReceiverTargets and _startAIDrive — no per-frame work needed here)
   }
 
   // ─── P28: RED ZONE FADE ROUTE ─────────────────────────────────────────────
