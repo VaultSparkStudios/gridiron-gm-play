@@ -2,9 +2,9 @@
 
 ## Snapshot
 
-- Date: 2026-03-24
+- Date: 2026-03-25
 - Overall status: Live on GitHub Pages, active development
-- Current version: P11 — QB scramble + OG image + analytics (paired with gridiron-gm v3.7+)
+- Current version: P43 — full backlog complete (paired with gridiron-gm v6.1)
 
 ## What exists
 
@@ -63,8 +63,19 @@
 
 - None
 
+## P36–P43 additions
+
+- **P36: Pick-Six Return** — DB user-controlled run after INT; lb/lb2 blockers; qb/rb/wr1 pursuit
+- **P37: Onside Kick** — post-score modal; rapid-tap RECOVER! 1.2s; ≥3 taps = bonus recovery
+- **P38: QB Scramble Spin Move** — SPIN button DL <40px; `_spinUsed`; 70% break / 30% sack
+- **P39: Fake Punt/Fake FG** — modal before punt/FG; 3s auto-dismiss to real
+- **P40: Goal Line QB Sneak** — yardLine≥94 & toGo≤1; PUSH! mash 4/0.8s
+- **P41: Drive Momentum Meter** — `_momentum` HUD bar; ±comp modifier per play
+- **P42: Challenge Flag** — `_challengeUsed`; `_prePlayState` snapshot; 45% overturn
+- **P43: 4th Quarter Comeback Mode** — `_comebackMode`; trailing 7+ Q4; comp bonus; banner
+
 ## Next 3 moves
 
 1. Wire analytics endpoint — set `VITE_ANALYTICS_URL` in `.env.local`
 2. Generate PNG OG image — open `../gridiron-gm/scripts/gen-og.html` in browser → `public/images/cover.png`
-3. Next gameplay: trade deadline, waiver wire, or playoffs UI polish
+3. New backlog TBD — all current features complete
