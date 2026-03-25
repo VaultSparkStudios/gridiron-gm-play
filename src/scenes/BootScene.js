@@ -1,5 +1,6 @@
 import { loadRoster } from '../data/defaultRoster.js';
 import { state, resetState } from '../data/gameState.js';
+import { track } from '../utils/analytics.js';
 
 export class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
@@ -10,6 +11,7 @@ export class BootScene extends Phaser.Scene {
     const { team, opponent, week, season } = loadRoster();
     state.team = team;
     state.opponent = opponent;
+    track('game_boot', { week: week||0, season: season||0 });
 
     this.add.rectangle(W/2, H/2, W, H, 0x0a0f1a);
 

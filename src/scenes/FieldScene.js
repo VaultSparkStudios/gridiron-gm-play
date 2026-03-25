@@ -405,7 +405,8 @@ export class FieldScene extends Phaser.Scene {
     if (this._jukeCDBar) { this._jukeCDBar.destroy(); this._jukeCDBar = null; }
     this.tweens.add({ targets: this.runner, scaleX: 0.65, scaleY: 0.65, duration: 180, yoyo: true });
     const yards = Math.round((this.runner.x - this.startX) / YARD_W);
-    const rb = (state.team?.players || []).find(p => p.pos === 'RB') || { str: 70 };
+    const runnerPos = this.runner === this.qb ? 'QB' : 'RB';
+    const rb = (state.team?.players || []).find(p => p.pos === runnerPos) || { str: 70 };
     const fumCh = Math.max(0.02, 0.055 - (rb.str - 70) * 0.0006);
     if (Math.random() < fumCh) {
       Sound.incomplete();
@@ -543,6 +544,23 @@ export class FieldScene extends Phaser.Scene {
 
   _sack() {
     if (this.phase !== 'pass_wait') return;
+    const qbData = state.team?.players?.find(p=>p.pos==='QB')||{spd:66,ovr:72,id:'qb1'};
+    if (Math.random() < 0.22) {
+      this._clearPassRush();
+      this.recTargets.forEach(r=>r?.destroy?.()); this.recTargets=[];
+      state.currentCall='scramble';
+      this.runner=this.qb; this.startX=this.qb.x; this._runnerData=qbData;
+      this.runSpd=pxs(qbData.spd,54,0.9);
+      this.phase='run';
+      this._tdFlash('SCRAMBLE!','#3b82f6');
+      this._startOLBlocker();
+      const dc=state.opponent?.dcScheme||'4-3';
+      const rushers=[this.dl,this.dl2,this.lb];
+      if(dc==='3-4'||dc==='Zone Blitz') rushers.push(this.lb2);
+      this._aiRushers(rushers); this._aiCBsSupport();
+      this.events.emit('phaseChange','run');
+      return;
+    }
     this._clearPassRush(); this.phase = 'result';
     Sound.sack();
     this.recTargets.forEach(r => r?.destroy?.()); this.recTargets = [];

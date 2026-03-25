@@ -1,4 +1,5 @@
 import { state, exportStats } from '../data/gameState.js';
+import { track } from '../utils/analytics.js';
 
 export class GameOverScene extends Phaser.Scene {
   constructor() { super('GameOver'); }
@@ -7,6 +8,7 @@ export class GameOverScene extends Phaser.Scene {
     const W = this.scale.width, H = this.scale.height;
     const stats = exportStats();
     const won = state.score.team > state.score.opp;
+    track('game_complete', { won:won?1:0, score_team:state.score.team, score_opp:state.score.opp, plays:state.plays });
 
     this.add.rectangle(W/2, H/2, W, H, 0x0a0f1a, 0.96);
 
