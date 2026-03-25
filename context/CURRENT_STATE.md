@@ -4,7 +4,7 @@
 
 - Date: 2026-03-24
 - Overall status: Live on GitHub Pages, active development
-- Current version: P6 — defense sub-positions + drive chart + CI (paired with gridiron-gm v3.7)
+- Current version: P11 — QB scramble + OG image + analytics (paired with gridiron-gm v3.7+)
 
 ## What exists
 
@@ -37,13 +37,23 @@
 - Run plays: each OL blocks nearest unblocked defender
 - Pass plays: OL arcs in front of QB; blockers interpose between QB and rushers
 
-### FieldScene additions (P6)
-- Defense dot labels: DE/DT (was generic DL), MLB/OLB (was generic LB), FS (was S)
-- Drive tracking: `state.currentDrive` accumulates team drives; `_aiDrivePlays/_aiDriveYards/_aiDriveStart` for AI
-- Drives pushed to `state.drives[]` on TD, turnover (INT/FUM/punt), or DOWNS
+### FieldScene additions (P6–P11)
+- Defense dot labels: DE/DT, MLB/OLB, FS
+- Drive tracking: `state.currentDrive` + `state.drives[]`
+- P7: 4th-down panel, PAT choice, FG/punt handlers
+- P8: Kickoff return mini-game (opening kick + user/AI returns)
+- P9: Fumble mechanic (~4%, RB/QB str-weighted)
+- P10: Halftime screen (4s overlay, 2nd-half kickoff); two-minute warning (plays 14 + 38)
+- P11: QB scramble — `_sack()` 22% → QB WASD run; `_tackled()` uses runner pos for fumble
+
+### Analytics (P11)
+- `src/utils/analytics.js` — privacy-safe `sendBeacon` tracker, `VITE_ANALYTICS_URL` env var
+- BootScene: `track('game_boot')`; GameOverScene: `track('game_complete', {won,score,plays})`
+- `.env.example` documents setup; no-op if URL unset
 
 ### Infrastructure
 - `.github/workflows/ci.yml` — Node 22, `npm ci && npm run build`, triggers on push/PR to master
+- OG+Twitter meta tags in `index.html`; `public/images/cover.svg` (1200×630)
 
 ## In progress
 
@@ -55,6 +65,6 @@
 
 ## Next 3 moves
 
-1. BootScene matchup card — show key player-vs-player ratings (LT vs top DE)
-2. Special teams module (kickoffs, field goal attempts in Phaser)
-3. OG image `public/images/cover.png`
+1. Wire analytics endpoint — set `VITE_ANALYTICS_URL` in `.env.local`
+2. Generate PNG OG image — open `../gridiron-gm/scripts/gen-og.html` in browser → `public/images/cover.png`
+3. Next gameplay: trade deadline, waiver wire, or playoffs UI polish

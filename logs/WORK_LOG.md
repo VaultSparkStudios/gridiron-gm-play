@@ -50,3 +50,19 @@ Append entries. Do not edit historical entries.
 - State: Committed, not yet pushed
 
 ---
+
+## 2026-03-24 — P10: Halftime + 2-min warning
+
+- _afterPlay(): halftime check (!_halfShown && quarter>=3); 2-min warning at plays 14/38
+- _resolveAIPlay() + _aiTouchdown(): halftime check added
+- _showHalftime(): 4s overlay with score+stats → 2nd-half kickoff return
+- _showTwoMinWarning(): banner + whistle, 2.2s, then cb()
+- gameState.js: _halfShown, _twoMin1, _twoMin2 in resetState()
+
+## 2026-03-24 — P11: QB scramble + OG image + analytics
+
+- _sack(): 22% scramble — QB WASD, _startOLBlocker + _aiRushers + _aiCBsSupport + blue tdFlash
+- _tackled(): fumble uses runner pos (QB or RB)
+- src/utils/analytics.js: sendBeacon tracker (VITE_ANALYTICS_URL)
+- BootScene: track('game_boot'); GameOverScene: track('game_complete')
+- index.html: OG+Twitter meta tags; public/images/cover.svg; .env.example
