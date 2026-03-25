@@ -27,6 +27,10 @@ export const state = {
 
   // Per-player stat deltas keyed by player id
   playerStats: {},
+
+  // Drive tracking
+  drives: [],
+  currentDrive: null,
 };
 
 export function resetState() {
@@ -44,6 +48,8 @@ export function resetState() {
     opp:  { passYds: 0, rushYds: 0, td: 0, int: 0, fumble: 0 },
   };
   state.playerStats = {};
+  state.drives = [];
+  state.currentDrive = null;
 }
 
 export function exportStats() {

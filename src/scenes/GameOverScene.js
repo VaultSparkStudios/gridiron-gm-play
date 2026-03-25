@@ -59,20 +59,33 @@ export class GameOverScene extends Phaser.Scene {
       });
     }
 
+    // Drive chart
+    if (state.drives && state.drives.length) {
+      this.add.text(W/2, 348, 'DRIVE CHART', { fontSize:'7px', fontFamily:'monospace', fontStyle:'bold', color:'#334155', letterSpacing:3 }).setOrigin(0.5);
+      let tRow=0, oRow=0;
+      state.drives.slice(0,10).forEach(d => {
+        const isTeam = d.poss==='team';
+        const row = isTeam ? tRow++ : oRow++;
+        const x = isTeam ? W/2-190 : W/2+10;
+        const col = d.result==='TD' ? '#22c55e' : (d.result==='INT'||d.result==='FUM') ? '#ef4444' : '#475569';
+        this.add.text(x, 358+row*12, `${d.plays}pl · ${d.yards}yd → ${d.result}`, { fontSize:'8px', fontFamily:'monospace', color:col });
+      });
+    }
+
     // Export notice
-    this.add.text(W/2, 368, '✅ Stats saved — import to Gridiron GM to update your season', {
+    this.add.text(W/2, 390, '✅ Stats saved — import to Gridiron GM to update your season', {
       fontSize:'9px', fontFamily:'monospace', color:'#334155'
     }).setOrigin(0.5);
 
     // Buttons
-    const playAgain = this.add.rectangle(W/2-90, 410, 160, 40, 0x22c55e).setInteractive({ useHandCursor:true });
-    this.add.text(W/2-90, 410, 'PLAY AGAIN', { fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#fff' }).setOrigin(0.5);
+    const playAgain = this.add.rectangle(W/2-90, 430, 160, 40, 0x22c55e).setInteractive({ useHandCursor:true });
+    this.add.text(W/2-90, 430, 'PLAY AGAIN', { fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#fff' }).setOrigin(0.5);
     playAgain.on('pointerdown', ()=>this.scene.start('Boot'));
     playAgain.on('pointerover', ()=>playAgain.setFillStyle(0x16a34a));
     playAgain.on('pointerout',  ()=>playAgain.setFillStyle(0x22c55e));
 
-    const menu = this.add.rectangle(W/2+90, 410, 160, 40, 0x1e293b).setInteractive({ useHandCursor:true }).setStrokeStyle(1,0x334155);
-    this.add.text(W/2+90, 410, 'MAIN MENU', { fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#94a3b8' }).setOrigin(0.5);
+    const menu = this.add.rectangle(W/2+90, 430, 160, 40, 0x1e293b).setInteractive({ useHandCursor:true }).setStrokeStyle(1,0x334155);
+    this.add.text(W/2+90, 430, 'MAIN MENU', { fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#94a3b8' }).setOrigin(0.5);
     menu.on('pointerdown', ()=>this.scene.start('Boot'));
   }
 }

@@ -76,10 +76,10 @@ export class FieldScene extends Phaser.Scene {
     this.rt  = this._dot(tc, 'RT',  13);
     this.oLine = [this.lt, this.lg, this.c, this.rg, this.rt];
     this.offPlayers = [this.qb, this.rb, this.wr1, this.wr2, this.te, ...this.oLine];
-    this.dl  = this._dot(oc, 'DL', 14);  this.dl2 = this._dot(oc, 'DL', 14);
-    this.lb  = this._dot(oc, 'LB', 12);  this.lb2 = this._dot(oc, 'LB', 12);
-    this.cb1 = this._dot(oc, 'CB', 10);  this.cb2 = this._dot(oc, 'CB', 10);
-    this.saf = this._dot(oc, 'S',  11);
+    this.dl  = this._dot(oc, 'DE',  14);  this.dl2 = this._dot(oc, 'DT',  14);
+    this.lb  = this._dot(oc, 'MLB', 12);  this.lb2 = this._dot(oc, 'OLB', 12);
+    this.cb1 = this._dot(oc, 'CB',  10);  this.cb2 = this._dot(oc, 'CB',  10);
+    this.saf = this._dot(oc, 'FS',  11);
     this.defPlayers = [this.dl, this.dl2, this.lb, this.lb2, this.cb1, this.cb2, this.saf];
     this.recTargets = [];
   }
@@ -680,16 +680,23 @@ export class FieldScene extends Phaser.Scene {
 
   _endPlay(result) {
     state.lastResult = result;
+    if (!state.currentDrive) state.currentDrive = { poss:'team', plays:0, yards:0, start:state.yardLine };
+    state.currentDrive.plays++;
+    state.currentDrive.yards += Math.max(0, result.yards || 0);
+    let driveEnd = null;
     if (result.td) {
+      driveEnd = 'TD';
       state.score.team += 7; state.yardLine=25; state.down=1; state.toGo=10; state.possession='team';
     } else if (result.turnover) {
+      driveEnd = result.type==='int'?'INT':result.type==='fumble'?'FUM':'PUNT';
       state.possession='opp'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10;
     } else {
       state.yardLine = Math.min(99, state.yardLine + result.yards);
       if (result.yards >= state.toGo) { state.down=1; state.toGo=10; }
       else { state.down++; state.toGo=Math.max(1,state.toGo-result.yards); }
-      if (state.down > 4) { state.possession='opp'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10; }
+      if (state.down > 4) { driveEnd='DOWNS'; state.possession='opp'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10; }
     }
+    if (driveEnd) { state.drives.push({...state.currentDrive, result:driveEnd}); state.currentDrive={poss:state.possession,plays:0,yards:0,start:state.yardLine}; }
     state.plays++;
     if (state.plays%8===0) state.quarter=Math.min(4,state.quarter+1);
     this.events.emit('playResult', result);
@@ -718,6 +725,7 @@ export class FieldScene extends Phaser.Scene {
 
   _startAIDrive() {
     this.aiDown = 1; this.aiToGo = 10;
+    this._aiDrivePlays = 0; this._aiDriveYards = 0; this._aiDriveStart = state.yardLine;
     this._resetAIFormation();
     this.phase = 'ai_run';
     const hud = this.scene.get('Hud');
@@ -742,6 +750,8 @@ export class FieldScene extends Phaser.Scene {
     state.score.opp += 7;
     state.stats.opp.td++;
     state.stats.opp.rushYds += Math.max(0, Math.round((this.aiStartX-FIELD_LEFT)/YARD_W));
+    state.drives.push({ poss:'opp', plays:this._aiDrivePlays||1, yards:this._aiDriveYards||0, start:this._aiDriveStart||25, result:'TD' });
+    this._aiDrivePlays=0; this._aiDriveYards=0;
     state.possession='team'; state.yardLine=25; state.down=1; state.toGo=10;
     state.plays++;
     if (state.plays%8===0) state.quarter=Math.min(4,state.quarter+1);
@@ -763,9 +773,11 @@ export class FieldScene extends Phaser.Scene {
   _resolveAIPlay(yardsGiven) {
     state.stats.opp.rushYds += yardsGiven;
     state.yardLine = Math.max(1, state.yardLine - yardsGiven);
+    this._aiDrivePlays = (this._aiDrivePlays||0) + 1;
+    this._aiDriveYards = (this._aiDriveYards||0) + yardsGiven;
     if (yardsGiven >= this.aiToGo) { this.aiDown=1; this.aiToGo=10; Sound.firstDown(); }
     else { this.aiDown++; this.aiToGo=Math.max(1,this.aiToGo-yardsGiven); }
-    if (this.aiDown>4) { state.possession='team'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10; }
+    if (this.aiDown>4) { state.drives.push({poss:'opp',plays:this._aiDrivePlays,yards:this._aiDriveYards,start:this._aiDriveStart||25,result:'DOWNS'}); this._aiDrivePlays=0; this._aiDriveYards=0; state.possession='team'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10; }
     state.plays++;
     if (state.plays%8===0) state.quarter=Math.min(4,state.quarter+1);
     const result = { text:`Stop! AI +${yardsGiven}yd${yardsGiven!==1?'s':''}`, yards:yardsGiven, td:false, turnover:false };
