@@ -53,7 +53,7 @@ export class BootScene extends Phaser.Scene {
     const tPlayers = team.players     || [];
     const oPlayers = opponent.players || [];
     const tLT  = tPlayers.find(p => p.pos === 'LT') || tPlayers.find(p => ['LT','LG','C','RG','RT'].includes(p.pos));
-    const oDE  = oPlayers.reduce((best, p) => (p.pos === 'DL' && (!best || p.ovr > best.ovr)) ? p : best, null);
+    const oDE  = oPlayers.reduce((best, p) => (['DE','DL'].includes(p.pos) && (!best || p.ovr > best.ovr)) ? p : best, null);
     const tQB  = tPlayers.find(p => p.pos === 'QB');
     const oCB  = oPlayers.reduce((best, p) => (p.pos === 'CB' && (!best || p.ovr > best.ovr)) ? p : best, null);
 

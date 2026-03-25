@@ -25,11 +25,11 @@ export const DEFAULT_OPPONENT = {
   clr: '#ef4444',
   ac: '#fca5a5',
   players: [
-    { id: 'dl1', name: 'Reggie Stone', pos: 'DL', ovr: 80, spd: 72, str: 88 },
-    { id: 'lb1', name: 'Carlos Vega',  pos: 'LB', ovr: 77, spd: 78, str: 82 },
-    { id: 'cb1', name: 'Devon Nash',   pos: 'CB', ovr: 81, spd: 90, str: 65 },
-    { id: 'cb2', name: 'Ray Foster',   pos: 'CB', ovr: 74, spd: 86, str: 62 },
-    { id: 's1',  name: 'Mark Diaz',    pos: 'S',  ovr: 76, spd: 82, str: 70 },
+    { id: 'dl1', name: 'Reggie Stone', pos: 'DE',  ovr: 80, spd: 72, str: 88 },
+    { id: 'lb1', name: 'Carlos Vega',  pos: 'MLB', ovr: 77, spd: 78, str: 82 },
+    { id: 'cb1', name: 'Devon Nash',   pos: 'CB',  ovr: 81, spd: 90, str: 65 },
+    { id: 'cb2', name: 'Ray Foster',   pos: 'CB',  ovr: 74, spd: 86, str: 62 },
+    { id: 's1',  name: 'Mark Diaz',    pos: 'FS',  ovr: 76, spd: 82, str: 70 },
   ]
 };
 

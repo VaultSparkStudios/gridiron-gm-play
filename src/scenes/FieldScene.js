@@ -23,6 +23,8 @@ export class FieldScene extends Phaser.Scene {
     this._buildDPad();
     this.phase = 'presnap';
     this.jukeCD = 0;
+    this._pendingPAT = false;
+    this._pendingKickoffCover = false;
     this._aiAngle = 0; this._aiJukeCD = 0;
     this.aiDown = 1; this.aiToGo = 10;
     this._lastReceiver = null;
@@ -30,10 +32,7 @@ export class FieldScene extends Phaser.Scene {
     this._pocketBeaten = [false, false, false, false, false];
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
-    this.time.delayedCall(200, () => {
-      this.scene.launch('PlayCall');
-      this.scene.bringToTop('PlayCall');
-    });
+    this.time.delayedCall(400, () => this._startKickoffReturn());
   }
 
   // ─── FIELD ────────────────────────────────────────────────────────────────
@@ -112,7 +111,7 @@ export class FieldScene extends Phaser.Scene {
 
   _buildDPad() {
     this._dpadState = { dx: 0, dy: 0 };
-    const bx = 720, by = 452, sz = 34, gap = 3;
+    const bx = 718, by = 452, sz = 44, gap = 2;
     [{ label:'▲',dx:0, dy:-1,ox:0,       oy:-(sz+gap) },
      { label:'▼',dx:0, dy: 1,ox:0,       oy: (sz+gap) },
      { label:'◀',dx:-1,dy: 0,ox:-(sz+gap),oy:0        },
@@ -186,7 +185,7 @@ export class FieldScene extends Phaser.Scene {
     this.ball.x = this.dl.x; this.ball.y = this.dl.y;
     this._aiAngle = 0; this._aiJukeCD = 0;
 
-    const rData = state.opponent?.players?.find(p => p.pos === 'DL') || { spd: 78 };
+    const rData = state.opponent?.players?.find(p => ['DE','DL'].includes(p.pos)) || { spd: 78 };
     const dData = state.team?.players?.find(p => p.pos === 'QB')     || { spd: 66 };
     this._aiRunSpeed = pxs(rData.spd, 64, 0.9);
     this._defSpd     = pxs(dData.spd, 90, 1.2);
@@ -245,8 +244,32 @@ export class FieldScene extends Phaser.Scene {
 
   _onPlayCalled(callId) {
     state.currentCall = callId;
-    if (callId.startsWith('run_') || callId === 'scramble') this._startRun(callId);
-    else if (callId.startsWith('pass_')) this._startPass(callId);
+    if      (callId === 'punt')                              this._doPunt();
+    else if (callId === 'fg')                                this._attemptFG();
+    else if (callId.startsWith('run_') || callId === 'scramble') this._startRun(callId);
+    else if (callId.startsWith('pass_'))                    this._startPass(callId);
+  }
+
+  _doPunt() {
+    this.phase = 'result';
+    Sound.whistle();
+    this._endPlay({ yards:0, text:'PUNT — possession flipped', type:'punt', turnover:true, td:false });
+  }
+
+  _attemptFG() {
+    this.phase = 'result';
+    const dist = (100 - state.yardLine) + 17;
+    const made = Math.random() < Math.max(0.18, Math.min(0.96, 1.08 - dist * 0.013));
+    Sound.whistle();
+    if (made) {
+      state.score.team += 3;
+      state.yardLine = 20; // flip in _endPlay will give opponent their 80 (80 yds to score)
+      this._pendingKickoffCover = true;
+      this._tdFlash(`FG GOOD! ${dist} yds +3`, '#22c55e');
+    } else {
+      this._tdFlash(`FG NO GOOD — ${dist} yds`, '#ef4444');
+    }
+    this._endPlay({ yards:0, text: made ? `FG GOOD! +3` : `FG NO GOOD`, type: made ? 'fg' : 'fg_miss', turnover:true, td:false });
   }
 
   // ─── RUN GAME ─────────────────────────────────────────────────────────────
@@ -326,7 +349,7 @@ export class FieldScene extends Phaser.Scene {
     const defData = state.opponent?.players || [];
     dots.forEach((dot, i) => {
       if (!dot.visible) return;
-      const pPos  = i === 0 ? 'DL' : 'LB';
+      const pPos  = i === 0 ? 'DE' : 'MLB';
       const pData = defData.find(p => p.pos === pPos) || { spd: 74 };
       // Tuned: defenders 38-52 px/s — fast enough to pressure, beatable with moves
       const spd = pxs(pData.spd, 38, 0.52) / 60; // convert to per-frame
@@ -432,7 +455,7 @@ export class FieldScene extends Phaser.Scene {
     if (dc === 'Zone Blitz') rushers.push(this.lb2);
     if (dc === '3-4')       rushers.push(this.dl2);
 
-    const dlData = state.opponent?.players?.find(p => p.pos === 'DL') || { spd: 75 };
+    const dlData = state.opponent?.players?.find(p => ['DE','DL'].includes(p.pos)) || { spd: 75 };
     this._passRushActive = true;
 
     // Each rusher is assigned a pocket blocker
@@ -686,9 +709,10 @@ export class FieldScene extends Phaser.Scene {
     let driveEnd = null;
     if (result.td) {
       driveEnd = 'TD';
-      state.score.team += 7; state.yardLine=25; state.down=1; state.toGo=10; state.possession='team';
+      state.score.team += 6; state.yardLine=25; state.down=1; state.toGo=10; state.possession='team';
+      this._pendingPAT = result.type === 'td'; // user TD only; AI TD goes through _aiTouchdown
     } else if (result.turnover) {
-      driveEnd = result.type==='int'?'INT':result.type==='fumble'?'FUM':'PUNT';
+      driveEnd = result.type==='int'?'INT':result.type==='fumble'?'FUM':result.type==='fg'?'FG':result.type==='fg_miss'?'NO FG':'PUNT';
       state.possession='opp'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10;
     } else {
       state.yardLine = Math.min(99, state.yardLine + result.yards);
@@ -710,15 +734,59 @@ export class FieldScene extends Phaser.Scene {
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
     } else if (state.possession==='opp') {
-      this.time.delayedCall(1800, ()=>this._startAIDrive());
+      this.time.delayedCall(1800, ()=>{
+        if (this._pendingKickoffCover) { this._pendingKickoffCover=false; this._startKickoffCover(); }
+        else this._startAIDrive();
+      });
     } else {
       this.time.delayedCall(1800, ()=>{
+        if (this._pendingPAT) { this._pendingPAT = false; this._showPATChoice(); return; }
         this._resetFormation(); this._drawLines();
         const hud = this.scene.get('Hud');
         hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
         this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
       });
     }
+  }
+
+  _showPATChoice() {
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const cleanup=()=>els.forEach(e=>e?.destroy?.());
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.8).setDepth(60));
+    els.push(this.add.text(W/2,H/2-60,'EXTRA POINT',{fontSize:'20px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b'}).setOrigin(0.5).setDepth(61));
+    els.push(this.add.text(W/2,H/2-34,'Choose your play:',{fontSize:'10px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(61));
+    const mkBtn=(cx,cy,label,sub,hx,cb)=>{
+      const b=this.add.rectangle(cx,cy,160,60,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
+      const lbl=this.add.text(cx,cy-10,label,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);
+      const s=this.add.text(cx,cy+10,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);
+      b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{cleanup();cb();});
+      els.push(b,lbl,s);
+    };
+    mkBtn(W/2-90,H/2+14,'KICK PAT','+1 pt  •  97%',0x22c55e,()=>this._resolvePAT('kick'));
+    mkBtn(W/2+90,H/2+14,'GO FOR 2','+2 pts  •  45%',0x3b82f6,()=>this._resolvePAT('two'));
+  }
+
+  _resolvePAT(choice) {
+    let pts=0, msg='', col='#f59e0b';
+    if (choice==='kick') {
+      const made=Math.random()<0.97;
+      pts=made?1:0; msg=made?'PAT GOOD! +1':'PAT MISSED'; col=made?'#22c55e':'#ef4444';
+    } else {
+      const made=Math.random()<0.45;
+      pts=made?2:0; msg=made?'2-PT GOOD! +2':'2-PT FAILED'; col=made?'#3b82f6':'#ef4444';
+    }
+    state.score.team+=pts;
+    if (pts>0) Sound.td(); else Sound.incomplete();
+    this._tdFlash(msg,col);
+    const hud=this.scene.get('Hud');
+    hud?.events?.emit('playResult',{text:msg,td:false,turnover:false,yards:0});
+    state.possession='opp'; state.down=1; state.toGo=10;
+    this.time.delayedCall(1600,()=>{
+      if (state.quarter>4||state.plays>=40) { this.scene.start('GameOver'); return; }
+      this._startKickoffCover();
+    });
   }
 
   // ─── AI POSSESSION ────────────────────────────────────────────────────────
@@ -762,11 +830,7 @@ export class FieldScene extends Phaser.Scene {
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(2000, ()=>this.scene.start('GameOver'));
     } else {
-      this.time.delayedCall(2400, ()=>{
-        this._resetFormation(); this._drawLines();
-        hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
-        this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
-      });
+      this.time.delayedCall(2400, ()=>this._startKickoffReturn());
     }
   }
 
@@ -797,9 +861,72 @@ export class FieldScene extends Phaser.Scene {
     }
   }
 
+  // ─── KICKOFF ──────────────────────────────────────────────────────────────
+
+  _showKickoffFlash(msg, sub, cb) {
+    const W=this.scale.width, H=this.scale.height;
+    const bg=this.add.rectangle(W/2,H/2,W,H,0x0a0f1a,0.88).setDepth(55);
+    const t=this.add.text(W/2,H/2-18,msg,{fontSize:'34px',fontFamily:'monospace',fontStyle:'bold',color:'#f1f5f9',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(56);
+    const s=this.add.text(W/2,H/2+22,sub,{fontSize:'11px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(56);
+    this.time.delayedCall(1300,()=>{
+      this.tweens.add({targets:[bg,t,s],alpha:0,duration:380,onComplete:()=>{bg.destroy();t.destroy();s.destroy();cb();}});
+    });
+  }
+
+  // User returns kickoff (game start or after AI TD)
+  _startKickoffReturn() {
+    const catchYard = Phaser.Math.Between(8,14);
+    state.yardLine = catchYard; state.down=1; state.toGo=10; state.possession='team';
+    this._showKickoffFlash('KICKOFF RETURN','WASD to return  •  SPACE to juke',()=>this._launchKickoffReturn(catchYard));
+  }
+
+  _launchKickoffReturn(catchYard) {
+    const cy=FIELD_Y+FIELD_H/2;
+    this.runner=this.rb; this.startX=yardToX(catchYard);
+    const pData=state.team?.players?.find(p=>p.pos==='RB')||{ovr:78,spd:82,id:'rb1'};
+    this._runnerData=pData;
+    this.runSpd=pxs(pData.spd,72,0.95);
+    state.currentCall='run_outside';
+    // Restore all labels first
+    [...this.offPlayers,...this.defPlayers].forEach(d=>{if(d._lbl&&d._origLabel)d._lbl.setText(d._origLabel);});
+    // Place returner deep, hide other offense
+    this._place(this.rb,yardToX(catchYard),cy);
+    this.ball.x=this.rb.x; this.ball.y=this.rb.y;
+    [this.qb,this.wr1,this.wr2,this.te,...this.oLine].forEach(d=>this._show(d,false));
+    this._show(this.rb,true);
+    // Spread coverage across midfield
+    const cvgDots=[this.dl,this.dl2,this.lb,this.lb2,this.cb1,this.cb2,this.saf];
+    const cvgYards=[38,44,50,54,58,62,68];
+    const offsets=[-72,-40,-16,0,16,40,72];
+    cvgDots.forEach((d,i)=>{this._place(d,yardToX(cvgYards[i]),cy+offsets[i]);this._show(d,true);d._lbl?.setText('CVG');});
+    this.phase='run'; this.jukeCD=0;
+    this._clearPassRush(); this._drawLines();
+    this._aiRushers([this.dl,this.dl2,this.lb,this.lb2]);
+    this._aiCBsSupport();
+    // saf converges slowly
+    this.time.addEvent({delay:16,loop:true,callback:()=>{
+      if(this.phase!=='run')return;
+      const dx=this.runner.x-this.saf.x,dy=this.runner.y-this.saf.y,dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist<13){this._tackled();return;}
+      if(dist>60){this.saf.x+=(dx/dist)*0.45;this.saf.y+=(dy/dist)*0.45;this._syncLbl(this.saf);}
+    }});
+    Sound.whistle();
+    const hud=this.scene.get('Hud');
+    hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
+    this.events.emit('phaseChange','run');
+  }
+
+  // AI returns kickoff (after user TD or FG)
+  _startKickoffCover() {
+    const catchYard=Phaser.Math.Between(87,95);
+    state.yardLine=catchYard; state.down=1; state.toGo=10; state.possession='opp';
+    this._showKickoffFlash('KICKOFF','WASD to cover  •  tackle the returner',()=>this._startAIDrive());
+  }
+
   _tdFlash(msg, col) {
     const W=this.scale.width, H=this.scale.height;
-    const flash = this.add.rectangle(W/2,H/2,W,H, col==='#f59e0b'?0xf59e0b:0xef4444, 0.28).setDepth(50);
+    const colMap={'#f59e0b':0xf59e0b,'#22c55e':0x22c55e,'#3b82f6':0x3b82f6,'#ef4444':0xef4444};
+    const flash = this.add.rectangle(W/2,H/2,W,H, colMap[col]??0xef4444, 0.28).setDepth(50);
     const txt = this.add.text(W/2, H/2, msg, {
       fontSize:'40px', fontFamily:'monospace', fontStyle:'bold', color:col, stroke:'#000', strokeThickness:5
     }).setOrigin(0.5).setDepth(51);

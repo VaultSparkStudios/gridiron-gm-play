@@ -67,7 +67,7 @@ export class GameOverScene extends Phaser.Scene {
         const isTeam = d.poss==='team';
         const row = isTeam ? tRow++ : oRow++;
         const x = isTeam ? W/2-190 : W/2+10;
-        const col = d.result==='TD' ? '#22c55e' : (d.result==='INT'||d.result==='FUM') ? '#ef4444' : '#475569';
+        const col = (d.result==='TD'||d.result==='FG') ? '#22c55e' : (d.result==='INT'||d.result==='FUM') ? '#ef4444' : '#475569';
         this.add.text(x, 358+row*12, `${d.plays}pl · ${d.yards}yd → ${d.result}`, { fontSize:'8px', fontFamily:'monospace', color:col });
       });
     }

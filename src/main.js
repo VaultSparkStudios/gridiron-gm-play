@@ -14,6 +14,10 @@ const config = {
   height: H,
   backgroundColor: '#0a0f1a',
   parent: document.body,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
   scene: [BootScene, FieldScene, HudScene, PlayCallScene, ResultScene, GameOverScene],
   physics: {
     default: 'arcade',
