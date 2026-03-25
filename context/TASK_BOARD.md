@@ -23,6 +23,10 @@
 - [x] Individual OL ovr from GM export controls pocket hold time
 - [x] defaultRoster.js updated with named OL starters
 - [x] Studio OS structure — AGENTS.md, context/, logs/, docs/, prompts/
+- [x] Defense sub-positions: DE/DT (was DL), MLB/OLB (was LB), FS (was S) — display labels only
+- [x] Drive chart: GameOverScene two-column layout, color-coded by result (TD/INT/FUM/DOWNS)
+- [x] Drive tracking: state.drives[] + state.currentDrive; AI drives via instance props
+- [x] ci.yml workflow — Node 22, npm ci + build, master branch
 
 ## In Progress
 
@@ -31,15 +35,12 @@
 ## Backlog — Gameplay
 
 - [ ] BootScene matchup card: LT ovr vs opponent top DE ovr (key matchup preview)
-- [ ] Defense sub-positions: DE/DT (from DL) and MLB/OLB (from LB); FS/SS (from S)
 - [ ] Special teams: kickoff play between possessions; field goal attempt in Phaser
 - [ ] Momentum system: big play chains give run/pass bonus
 - [ ] Replay highlight: brief animated replay of TD/INT/sack after play resolves
-- [ ] 4th-down decision UI: punt / go for it / field goal option
-- [ ] Drive chart: GameOverScene shows sequence of plays (run/pass/sack/TD) per drive
+- [ ] 4th-down decision in PlayCall scene (Phaser-side — GM side already done)
 
 ## Backlog — Infrastructure
 
-- [ ] ci.yml workflow (build + lint check)
 - [ ] OG image at `public/images/cover.png`
 - [ ] Mobile layout improvements (larger D-pad, better touch targets)

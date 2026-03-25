@@ -25,9 +25,7 @@ Append entries. Do not edit historical entries.
 
 ---
 
-## 2026-03-24
-
-- Session: 5-man OL + Studio OS compliance
+## 2026-03-24 — 5-man OL + Studio OS compliance
 - Feature: 5-man OL with individual positions (LT/LG/C/RG/RT) — paired with gridiron-gm POS change
   - Created `this.lt, this.lg, this.c, this.rg, this.rt` dots and `this.oLine` array
   - Formation: C at cy, guards ±14px, tackles ±28px at LOS
@@ -37,5 +35,18 @@ Append entries. Do not edit historical entries.
 - Updated: defaultRoster.js with named starters (Trent Williams, Q. Nelson, etc.)
 - Studio OS: Created full Studio OS structure (AGENTS.md, context/, logs/, docs/, prompts/)
 - State: Build passes, 5-man OL working, Studio OS complete
+
+---
+
+## 2026-03-24 (continued) — P6 backlog clearance
+
+- Session: Defense sub-positions, drive chart, drive tracking, CI
+- FieldScene: Changed defense dot labels to DE/DT, MLB/OLB, FS (display only)
+- FieldScene: Drive tracking — state.currentDrive accumulates plays/yards; pushed to state.drives on end; AI drives via instance props
+- gameState.js: Added drives[] and currentDrive to state object and resetState()
+- GameOverScene: Drive chart section — reads state.drives[], two-column layout (team left, opp right), green=TD, red=INT/FUM, gray=DOWNS
+- .github/workflows/ci.yml: Node 22, npm ci + npm run build, triggers on push/PR to master
+- Both repos build clean. gridiron-gm 303kB, gridiron-gm-play 1240kB (Phaser, pre-existing warning)
+- State: Committed, not yet pushed
 
 ---

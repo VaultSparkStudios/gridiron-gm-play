@@ -20,16 +20,22 @@ Last updated: 2026-03-24
 - All Studio OS files created: AGENTS.md, context/ (PROJECT_BRIEF, SOUL, BRAIN, CURRENT_STATE, TASK_BOARD, DECISIONS, LATEST_HANDOFF), logs/, docs/, prompts/
 - repo is now self-sufficient per VaultSpark deployment standard
 
+### P6 additions (2026-03-24 backlog clearance)
+- **Defense sub-positions**: FieldScene dot labels → DE/DT, MLB/OLB, FS (display only, no logic change)
+- **Drive tracking**: `state.currentDrive` object accumulates plays/yards/result for team possessions; AI tracked via `_aiDrivePlays/_aiDriveYards/_aiDriveStart`; drives pushed to `state.drives[]` on completion
+- **Drive chart**: GameOverScene reads `state.drives[]`, renders two-column (team | opp), color-coded results
+- **CI**: `.github/workflows/ci.yml` — Node 22, `npm ci && npm run build`, push/PR to master
+- **gameState.js**: `drives[]` and `currentDrive` added to state object and `resetState()`
+
 ## What is mid-flight
 
-- Nothing — all work committed and pushed
+- Both repos committed, not yet pushed to remote
 
 ## What to do next
 
 1. BootScene matchup card: show LT ovr vs opponent top DE ovr (key positional matchup)
-2. Defense sub-position labels: DE/DT, MLB/OLB, FS/SS
-3. 4th-down decision UI in Phaser
-4. ci.yml workflow
+2. Special teams module (kickoffs / Phaser FG attempt)
+3. OG image `public/images/cover.png`
 
 ## Constraints
 

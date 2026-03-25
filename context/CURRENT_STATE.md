@@ -4,7 +4,7 @@
 
 - Date: 2026-03-24
 - Overall status: Live on GitHub Pages, active development
-- Current version: P5 + 5-man OL (paired with gridiron-gm v3.6+)
+- Current version: P6 — defense sub-positions + drive chart + CI (paired with gridiron-gm v3.7)
 
 ## What exists
 
@@ -22,7 +22,7 @@
   - Mobile D-pad overlay (4-button, bottom-right)
 - HudScene — persistent overlay: score, down/distance, possession banner
 - PlayCallScene — 8-play menu (4 run + 4 pass); 88% opaque overlay
-- GameOverScene — final score, per-player stat breakdown, writes `gm_game_result`
+- GameOverScene — final score, per-player stat breakdown, drive chart, writes `gm_game_result`
 
 ### GM Bridge (full loop)
 - GM schedule → 🎮 Play button → exports `gm_roster_export` → opens Play tab
@@ -37,9 +37,17 @@
 - Run plays: each OL blocks nearest unblocked defender
 - Pass plays: OL arcs in front of QB; blockers interpose between QB and rushers
 
+### FieldScene additions (P6)
+- Defense dot labels: DE/DT (was generic DL), MLB/OLB (was generic LB), FS (was S)
+- Drive tracking: `state.currentDrive` accumulates team drives; `_aiDrivePlays/_aiDriveYards/_aiDriveStart` for AI
+- Drives pushed to `state.drives[]` on TD, turnover (INT/FUM/punt), or DOWNS
+
+### Infrastructure
+- `.github/workflows/ci.yml` — Node 22, `npm ci && npm run build`, triggers on push/PR to master
+
 ## In progress
 
-- Studio OS structure (just created this session)
+- (none)
 
 ## Blockers
 
@@ -48,5 +56,5 @@
 ## Next 3 moves
 
 1. BootScene matchup card — show key player-vs-player ratings (LT vs top DE)
-2. Defense sub-positions: DE, DT, MLB, OLB, FS, SS labels
-3. Special teams module (kickoffs, field goal attempts in Phaser)
+2. Special teams module (kickoffs, field goal attempts in Phaser)
+3. OG image `public/images/cover.png`
