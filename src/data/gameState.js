@@ -37,6 +37,9 @@ export const state = {
 
   // Weather: 'clear' | 'rain' | 'snow'
   weather: 'clear',
+
+  // GM bridge — set from gm_roster_export so exportStats can write it back
+  gameId: null,
 };
 
 export function resetState() {
@@ -58,6 +61,7 @@ export function resetState() {
   state.currentDrive = null;
   state.injuries = [];
   state.weather = 'clear';
+  state.gameId = null;
   state._halfShown = false;
   state._twoMin1 = false;
   state._twoMin2 = false;
@@ -72,6 +76,7 @@ export function exportStats() {
     oppName: state.opponent?.name,
     // Per-player deltas — GM reads these to update player season stats
     injuries: state.injuries || [],
+    gameId: state.gameId || null,
     playerDeltas: state.team?.players?.map(p => {
       const ps = state.playerStats[p.id] || {};
       return {
@@ -79,12 +84,14 @@ export function exportStats() {
         passYds: ps.passYds || 0,
         att:     ps.att     || 0,
         comp:    ps.comp    || 0,
+        passTD:  ps.passTD  || 0,
+        ints:    ps.int     || 0,
         rushYds: ps.rushYds || 0,
         rushAtt: ps.rushAtt || 0,
+        rtds:    ps.rushTD  || 0,
         recYds:  ps.recYds  || 0,
         rec:     ps.rec     || 0,
-        td:      ps.td      || 0,
-        int:     ps.int     || 0,
+        retds:   ps.recTD   || 0,
       };
     }) || [],
   };

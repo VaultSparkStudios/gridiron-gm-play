@@ -12,6 +12,22 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 // pixels/second from a speed rating
 function pxs(spd, base, scale) { return base + (spd - 70) * scale; }
 
+// P54: Expanded audible hot routes
+const AUDIBLE_ROUTES = {
+  'screen': { label:'RB SCREEN', passBonus:0.10, yardsBase:5,  risk:'low'    },
+  'slant':  { label:'SLANT',     passBonus:0.15, yardsBase:8,  risk:'low'    },
+  'fade':   { label:'FADE',      passBonus:-0.10,yardsBase:18, risk:'high'   },
+  'out':    { label:'OUT ROUTE', passBonus:0.08, yardsBase:10, risk:'medium' },
+};
+// P55: Defensive formation variants
+const DEF_FORMATIONS = {
+  '4-3':    { coverageBonus:0,     sackBonus:0.02,  label:'4-3'    },
+  '3-4':    { coverageBonus:0.05,  sackBonus:0,     label:'3-4'    },
+  'nickel': { coverageBonus:0.12,  sackBonus:-0.01, label:'NICKEL' },
+  'dime':   { coverageBonus:0.18,  sackBonus:-0.02, label:'DIME'   },
+  'blitz':  { coverageBonus:-0.10, sackBonus:0.06,  label:'BLITZ'  },
+};
+
 export class FieldScene extends Phaser.Scene {
   constructor() { super('Field'); }
 
@@ -44,6 +60,11 @@ export class FieldScene extends Phaser.Scene {
     this._matchupWR1 = 75; this._matchupWR2 = 75; this._matchupEls = [];
     this._fgBlockEls = []; this._qbInjured = false; this._qbInjEl = null;
     this._clockMgmtEls = []; this._p51Hold = false;
+    // P54-P58: new feature flags
+    this._fatigue = {};
+    this._qbReadsActive = false; this._qbReadChoice = 'primary'; this._readOverlayElems = [];
+    this._activeAudible = null; this._audibleMenuShown = false; this._audibleMenuElems = [];
+    this._defFormation = '4-3'; this._defFormElems = [];
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
@@ -336,6 +357,8 @@ export class FieldScene extends Phaser.Scene {
     if(this._audibleActive&&state.possession==='team'){const forced=this._audibleActive;this._audibleActive=null;this._audibleUsed=true;if(forced==='run')callId='run_middle';else if(forced==='pass')callId='pass_short';state.currentCall=callId;this._tdFlash('AUDIBLE CALLED','#f59e0b');}
     // P48: generate holding roll at snap for pass plays
     if(callId.startsWith('pass_'))this._holdingRoll=Math.random()<0.08;
+    // P56: Goal line formation flash
+    if(this._isGoalLine()&&state.possession==='team')this._applyGoalLineFormation();
     // P17: False start ~4% (offensive penalty, -5 yards, no play); P43: +5% AI false start in comeback mode
     const falseStartCh = 0.04; // base chance — comebackMode would increase OPPONENT's false starts, but we just log ours
     if (this.phase === 'presnap' && callId !== 'punt' && callId !== 'fg' && Math.random() < falseStartCh) {
@@ -707,7 +730,9 @@ export class FieldScene extends Phaser.Scene {
 
   _resolveTackle(yards, taps) {
     const runnerPos = this.runner === this.qb ? 'QB' : 'RB';
-    const rb = (state.team?.players || []).find(p => p.pos === runnerPos) || { str: 70 };
+    const rb = (state.team?.players || []).find(p => p.pos === runnerPos) || { str: 70, id: runnerPos.toLowerCase()+'1' };
+    // P55: apply fatigue to runner
+    if (rb.id) this._applyFatigue(rb.id, runnerPos === 'QB' ? 12 : 8);
     const wxFumM = state.weather==='snow'?1.5:state.weather==='rain'?1.3:1;
     let fumCh = Math.max(0.02, (0.055 - (rb.str - 70) * 0.0006) * wxFumM);
     if (taps < 2) fumCh = Math.min(0.60, fumCh * 4);
@@ -747,6 +772,8 @@ export class FieldScene extends Phaser.Scene {
     this._startPassRush(isAction);
     Sound.whistle();
     this.events.emit('phaseChange', 'pass');
+    // P54: Show QB reads overlay before receivers are clickable
+    if (state.possession === 'team') { this._qbReadsActive = true; this._showQBReads(); }
     this.time.delayedCall(isAction ? 850 : 550, () => this._buildReceiverTargets(isAction));
   }
 
@@ -1047,13 +1074,23 @@ export class FieldScene extends Phaser.Scene {
     let yards = rawYards;
     if (yards === undefined) {
       if (isRun) {
-        // Base 2–5 yards; speed differential adds 0–3 more
-        const base = 2 + ((rb.spd - 70) * 0.10) + Phaser.Math.Between(-1, 5);
+        // P55: fatigue multiplier on runner speed
+        const runner = call==='scramble' ? qb : rb;
+        const fatMul = this._getFatigueMultiplier(runner.id);
+        // P56: Goal line package — short yardage calculation
+        let base;
+        if (this._isGoalLine()) {
+          base = Math.floor(Math.random() * 3); // 0, 1, or 2 yards
+          if ((rb.str || 70) > 75 && Math.random() < 0.35) base = Math.min(2, base + 1);
+        } else {
+          // Base 2–5 yards; speed differential adds 0–3 more
+          base = 2 + ((rb.spd - 70) * 0.10 * fatMul) + Phaser.Math.Between(-1, 5);
+        }
         yards = Math.round(base * qteBonus);
       } else if (isPass) {
         const variant = call.replace('pass_','');
         const isDeep = variant==='deep' || variant==='action';
-        const intCh  = isDeep ? 0.11 : 0.04;
+        let intCh  = isDeep ? 0.11 : 0.04;
         const wxPassM = state.weather==='snow'?0.80:state.weather==='rain'?0.86:1;
         // P41: momentum bonus to completion; P43: comeback mode +5% WR speed approximated as +3% comp
         const momBonus=(this._momentum-50)*0.0008;
@@ -1061,7 +1098,17 @@ export class FieldScene extends Phaser.Scene {
         // P49: matchup advantage on comp%; P52: QB shaken up -8%
         const matchupBonus=(((this._matchupWR1||75)-(db.ovr||75))*0.0008);
         const qbInjPenalty=this._qbInjured?-0.08:0;
-        const compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty)*wxPassM, 0.22, 0.88);
+        // P55: defensive formation coverage/sack bonus
+        const defForm = DEF_FORMATIONS[this._defFormation] || DEF_FORMATIONS['4-3'];
+        intCh = Math.max(0.01, intCh - defForm.coverageBonus * 0.5);
+        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus)*wxPassM, 0.22, 0.88);
+        // P54: QB reads modifier
+        const qbRead = this._qbReadChoice || 'primary';
+        if (qbRead === 'checkdown') { compCh = Math.min(0.92, compCh + 0.15); }
+        else if (qbRead === 'go_route') { compCh = Math.max(0.10, compCh - 0.20); }
+        // P54: expanded audible hot-route bonus
+        const audibleRoute = this._activeAudible ? AUDIBLE_ROUTES[this._activeAudible] : null;
+        if (audibleRoute) { compCh = clamp(compCh + audibleRoute.passBonus, 0.10, 0.92); }
         if (type==='covered' && Math.random()<intCh*2) {
           Sound.int(); state.stats.team.int++;
           this._track(qb.id,'int',1);
@@ -1077,7 +1124,13 @@ export class FieldScene extends Phaser.Scene {
           Sound.incomplete(); this._track(qb.id,'att',1);
           this._endPlay({ yards:0, text:'Incomplete.', type:'inc', turnover:false, td:false }); return;
         }
-        const base = isDeep ? Phaser.Math.Between(14,36) : variant==='quick' ? Phaser.Math.Between(3,8) : Phaser.Math.Between(6,15);
+        let base = isDeep ? Phaser.Math.Between(14,36) : variant==='quick' ? Phaser.Math.Between(3,8) : Phaser.Math.Between(6,15);
+        // P54: audible route overrides base yards
+        if (audibleRoute) { base = audibleRoute.yardsBase + Phaser.Math.Between(-2, 4); this._activeAudible = null; }
+        // P54: QB read modifies yards
+        if (qbRead === 'checkdown') base = Math.round(base * 0.6);
+        else if (qbRead === 'go_route') base = Math.round(base * 1.8);
+        this._qbReadChoice = 'primary'; // reset
         yards = Math.round(base * qteBonus);
       }
     }
@@ -1106,7 +1159,7 @@ export class FieldScene extends Phaser.Scene {
       state.stats.team.rushYds += Math.max(0, yards);
       const runner = call==='scramble' ? qb : rb;
       this._track(runner.id,'rushYds',Math.max(0,yards)); this._track(runner.id,'rushAtt',1);
-      if (td) this._track(runner.id,'td',1);
+      if (td) this._track(runner.id,'rushTD',1);
     }
     if (isPass) {
       state.stats.team.passYds += Math.max(0, yards);
@@ -1114,7 +1167,7 @@ export class FieldScene extends Phaser.Scene {
       if (this._lastReceiver) {
         this._track(this._lastReceiver.id,'recYds',Math.max(0,yards));
         this._track(this._lastReceiver.id,'rec',1);
-        if (td) this._track(this._lastReceiver.id,'td',1);
+        if (td) { this._track(this._lastReceiver.id,'recTD',1); this._track(qb.id,'passTD',1); }
       }
       this._lastReceiver = null;
     }
@@ -1173,7 +1226,7 @@ export class FieldScene extends Phaser.Scene {
     }
     if (driveEnd) { state.drives.push({...state.currentDrive, result:driveEnd}); state.currentDrive={poss:state.possession,plays:0,yards:0,start:state.yardLine}; }
     state.plays++;
-    if (state.plays%8===0) state.quarter=Math.min(4,state.quarter+1);
+    if (state.plays%8===0) { state.quarter=Math.min(4,state.quarter+1); this._recoverFatigue(); }
     // P41: momentum drain on turnover
     if(result.turnover) this._updateMomentum(-12);
     this.events.emit('playResult', result);
@@ -1204,8 +1257,12 @@ export class FieldScene extends Phaser.Scene {
         this._resetFormation(); this._drawLines();
         const hud = this.scene.get('Hud');
         hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
+        // P53: clock management takes priority in Q4 comeback even over drill mode
+        const _q4Comeback = state.quarter>=4 && (state.score.opp-state.score.team)>=1 && (state.score.opp-state.score.team)<=8 && (state.lastResult?.type==='run'||state.lastResult?.type==='inc');
+        if (_q4Comeback) {
+          this._showClockMgmt(state.lastResult?.type==='inc'?'spike':'oob');
         // P30: two-minute drill — auto no-huddle
-        if (state._drillMode) {
+        } else if (state._drillMode) {
           [this.cb1,this.cb2].forEach(c=>{c.x+=(Math.random()-0.5)*20;c.y+=(Math.random()-0.5)*20;this._syncLbl(c);});
           if(this.lb.visible){this.lb.x+=(Math.random()-0.5)*14;this.lb.y+=(Math.random()-0.5)*14;this._syncLbl(this.lb);}
           const dTxt=this.add.text(this.scale.width/2,FIELD_Y-24,'⚡ 2-MIN DRILL',{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(20);
@@ -1213,9 +1270,6 @@ export class FieldScene extends Phaser.Scene {
         } else if (state.down === 1 && state.toGo === 10 && this._lastPlayGainedFirstDown) {
           // P23: offer no-huddle after first down
           this._showNoHuddleOption();
-        } else if (state.quarter>=4 && (state.score.opp-state.score.team)>=1 && (state.score.opp-state.score.team)<=8 && (state.lastResult?.type==='run'||state.lastResult?.type==='inc')) {
-          // P53: clock management — spike or out of bounds option in comeback situations
-          this._showClockMgmt(state.lastResult?.type==='inc'?'spike':'oob');
         } else {
           this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
         }
@@ -1564,7 +1618,7 @@ export class FieldScene extends Phaser.Scene {
     const panelW = 370, panelH = 280;
     const px = W/2, py = H - panelH/2 - 8;
     const els = [];
-    const cleanup = () => els.forEach(e => e?.destroy?.());
+    const cleanup = () => { els.forEach(e => e?.destroy?.()); this._clearDefFormSelector(); };
     els.push(this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.88).setDepth(35));
     els.push(this.add.rectangle(px, py, panelW, panelH, 0x0d1424, 1).setDepth(36).setStrokeStyle(1, 0x334155));
     els.push(this.add.text(px, py - panelH/2 + 14, '🛡  CALL YOUR DEFENSE', {
@@ -1573,6 +1627,8 @@ export class FieldScene extends Phaser.Scene {
     els.push(this.add.text(px, py - panelH/2 + 30, `OPP BALL  •  yd ${Math.max(1, 100 - state.yardLine)}`, {
       fontSize:'10px', fontFamily:'monospace', color:'#64748b'
     }).setOrigin(0.5, 0).setDepth(37));
+    // P55: Show def formation selector alongside coverage call
+    this._showDefFormationSelector();
     const DCALLS = [
       { id:'cover2',  label:'Cover 2',   tip:'Deep safeties — limit big plays', col:'#3b82f6' },
       { id:'man',     label:'Man Press', tip:'+22% DEF spd  •  AI +6% spd',     col:'#22c55e' },
@@ -1772,6 +1828,8 @@ export class FieldScene extends Phaser.Scene {
   // User returns kickoff (game start or after AI TD)
   _startKickoffReturn() {
     this._audibleUsed=false; this._audibleActive=null; // P45: reset audible on new possession
+    // P54: reset expanded audible state on new drive
+    this._audibleMenuShown=false; this._activeAudible=null;
     const catchYard = Phaser.Math.Between(8,14);
     state.yardLine = catchYard; state.down=1; state.toGo=10; state.possession='team';
     this._showKickoffFlash('KICKOFF RETURN','WASD to return  •  SPACE to juke',()=>this._launchKickoffReturn(catchYard));
@@ -2096,6 +2154,12 @@ export class FieldScene extends Phaser.Scene {
       if(!this._audibleBtn)this._buildAudibleBtn();
     } else if(this.phase!=='presnap'&&this._audibleBtn){
       this._destroyAudibleBtn();
+    }
+    // P54: Show expanded hot-route audible menu during presnap (user offense)
+    if(this.phase==='presnap'&&state.possession==='team'){
+      if(!this._audibleMenuShown)this._showAudibleMenu();
+    } else if(this.phase!=='presnap'&&this._audibleMenuShown){
+      this._audibleMenuElems.forEach(e=>{try{e.destroy();}catch{}});this._audibleMenuElems=[];this._audibleMenuShown=false;
     }
 
     // USER OFFENSE — run
@@ -2886,6 +2950,139 @@ export class FieldScene extends Phaser.Scene {
     if(!state._halfShown&&state.quarter>=3){state._halfShown=true;this.time.delayedCall(1600,()=>this._showHalftime());return;}
     if(state.quarter>4||state.plays>=40){this.time.delayedCall(1600,()=>this.scene.start('GameOver'));}
     else{this.time.delayedCall(2000,()=>this._startKickoffReturn());}
+  }
+
+  // ─── P54: QB READS SYSTEM ────────────────────────────────────────────────
+
+  _showQBReads() {
+    if (!this._qbReadsActive) return;
+    this._clearReadOverlay();
+    const W = this.scale.width, H = this.scale.height;
+    const reads = [
+      { x: W*0.28, y: H*0.55, type:'checkdown', label:'CHECK\nDOWN', clr:0xeab308 },
+      { x: W*0.50, y: H*0.45, type:'primary',   label:'PRIMARY',     clr:0x22c55e },
+      { x: W*0.72, y: H*0.38, type:'go_route',  label:'GO\nROUTE',   clr:0xef4444 },
+    ];
+    reads.forEach(r => {
+      const circ = this.add.circle(r.x, r.y, 22, r.clr, 0.28).setDepth(30);
+      const border = this.add.circle(r.x, r.y, 22, 0, 0).setStrokeStyle(2, r.clr).setDepth(31);
+      const txt = this.add.text(r.x, r.y, r.label, { fontSize:'7px', fontFamily:'monospace', color:'#fff', fontStyle:'bold', align:'center' }).setOrigin(0.5).setDepth(32);
+      circ.setInteractive().on('pointerdown', () => { this._qbReadChoice = r.type; this._clearReadOverlay(); this._qbReadsActive = false; });
+      this._readOverlayElems.push(circ, border, txt);
+    });
+    this.time.delayedCall(2500, () => { if(this._qbReadsActive){ this._clearReadOverlay(); this._qbReadsActive=false; } });
+  }
+
+  _clearReadOverlay() {
+    this._readOverlayElems.forEach(e => { try { e.destroy(); } catch(e2) {} });
+    this._readOverlayElems = [];
+  }
+
+  // ─── P55: PLAYER FATIGUE ─────────────────────────────────────────────────
+
+  _applyFatigue(pid, amount) {
+    if (!pid) return;
+    this._fatigue[pid] = Math.min(100, (this._fatigue[pid] || 0) + amount);
+    this._updateFatigueHUD();
+  }
+
+  _getFatigueMultiplier(pid) {
+    const f = this._fatigue[pid] || 0;
+    if (f < 30) return 1.0;
+    if (f < 60) return 0.93;
+    if (f < 80) return 0.85;
+    return 0.75;
+  }
+
+  _recoverFatigue() {
+    Object.keys(this._fatigue).forEach(pid => {
+      this._fatigue[pid] = Math.max(0, (this._fatigue[pid] || 0) - 20);
+    });
+    this._updateFatigueHUD();
+  }
+
+  _updateFatigueHUD() {
+    if (this._fatigueEl) { try { this._fatigueEl.destroy(); } catch{} this._fatigueEl = null; }
+    const qb = state.team?.players?.find(p=>p.pos==='QB');
+    const rb = state.team?.players?.find(p=>p.pos==='RB');
+    const qbF = qb ? (this._fatigue[qb.id] || 0) : 0;
+    const rbF = rb ? (this._fatigue[rb.id] || 0) : 0;
+    const maxF = Math.max(qbF, rbF);
+    if (maxF < 60) return;
+    const W = this.scale.width;
+    const who = maxF === qbF ? 'QB' : 'RB';
+    this._fatigueEl = this.add.text(W - 8, FIELD_Y + FIELD_H + 10, `${who} TIRED`, {
+      fontSize:'8px', fontFamily:'monospace', color:'#f97316', stroke:'#000', strokeThickness:1
+    }).setOrigin(1, 0).setDepth(18);
+    this.time.delayedCall(2000, () => { try { this._fatigueEl?.destroy(); this._fatigueEl=null; } catch{} });
+  }
+
+  // ─── P56: GOAL LINE PACKAGE ──────────────────────────────────────────────
+
+  _isGoalLine() { return state.yardLine >= 93; }
+
+  _applyGoalLineFormation() {
+    const glBanner = this.add.text(this.scale.width * 0.5, this.scale.height * 0.15,
+      'GOAL LINE STAND', { fontSize:'11px', fontFamily:'monospace', color:'#ffd700', fontStyle:'bold', stroke:'#000', strokeThickness:2 }
+    ).setOrigin(0.5).setDepth(25);
+    this.time.delayedCall(1500, () => { try { glBanner.destroy(); } catch {} });
+  }
+
+  // ─── P57: EXPANDED AUDIBLE MENU ──────────────────────────────────────────
+
+  _showAudibleMenu() {
+    if (this._audibleMenuShown || state.possession !== 'team') return;
+    this._audibleMenuShown = true;
+    const W = this.scale.width, H = this.scale.height;
+    const routes = Object.entries(AUDIBLE_ROUTES);
+    this._audibleMenuElems = [];
+    routes.forEach(([key, r], i) => {
+      const x = W * 0.18 + i * 62;
+      const y = H * 0.89;
+      const active = this._activeAudible === key;
+      const bg = this.add.rectangle(x, y, 56, 18, active ? 0x1d4ed8 : 0x1e293b).setDepth(20).setStrokeStyle(1, active ? 0x3b82f6 : 0x334155);
+      const txt = this.add.text(x, y, r.label, { fontSize:'6px', fontFamily:'monospace', color: active ? '#fff' : '#94a3b8', fontStyle: active ? 'bold' : 'normal' }).setOrigin(0.5).setDepth(21);
+      bg.setInteractive().on('pointerdown', () => {
+        this._activeAudible = this._activeAudible === key ? null : key;
+        // Refresh menu to show active state
+        this._audibleMenuElems.forEach(e => { try { e.destroy(); } catch {} });
+        this._audibleMenuElems = [];
+        this._audibleMenuShown = false;
+        this._showAudibleMenu();
+        if (this._activeAudible) {
+          const flash = this.add.text(W/2, H/2 - 40, `AUDIBLE: ${r.label}`, {
+            fontSize:'13px', fontFamily:'monospace', color:'#eab308', fontStyle:'bold', stroke:'#000', strokeThickness:2
+          }).setOrigin(0.5).setDepth(30);
+          this.time.delayedCall(900, () => { try { flash.destroy(); } catch {} });
+        }
+      });
+      this._audibleMenuElems.push(bg, txt);
+    });
+  }
+
+  // ─── P58: DEFENSIVE FORMATION SELECTOR ───────────────────────────────────
+
+  _showDefFormationSelector() {
+    this._clearDefFormSelector();
+    const W = this.scale.width;
+    const fKeys = Object.keys(DEF_FORMATIONS);
+    this._defFormElems = [];
+    fKeys.forEach((key, i) => {
+      const x = W - 175 + i * 38;
+      const y = 28;
+      const active = this._defFormation === key;
+      const bg = this.add.rectangle(x, y, 32, 14, active ? 0x1d4ed8 : 0x1e293b)
+        .setDepth(20).setStrokeStyle(1, active ? 0x3b82f6 : 0x334155);
+      const txt = this.add.text(x, y, DEF_FORMATIONS[key].label, {
+        fontSize:'6px', fontFamily:'monospace', color: active ? '#fff' : '#64748b', fontStyle: active ? 'bold' : 'normal'
+      }).setOrigin(0.5).setDepth(21);
+      bg.setInteractive().on('pointerdown', () => { this._defFormation = key; this._showDefFormationSelector(); });
+      this._defFormElems.push(bg, txt);
+    });
+  }
+
+  _clearDefFormSelector() {
+    if (this._defFormElems) { this._defFormElems.forEach(e => { try { e.destroy(); } catch {} }); this._defFormElems = []; }
   }
 
   // P53: Clock Management Mode ─────────────────────────────────────────────
