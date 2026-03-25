@@ -50,6 +50,9 @@ export function resetState() {
   state.playerStats = {};
   state.drives = [];
   state.currentDrive = null;
+  state._halfShown = false;
+  state._twoMin1 = false;
+  state._twoMin2 = false;
 }
 
 export function exportStats() {

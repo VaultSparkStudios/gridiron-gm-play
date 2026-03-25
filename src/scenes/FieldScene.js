@@ -741,6 +741,7 @@ export class FieldScene extends Phaser.Scene {
   }
 
   _afterPlay() {
+    if (!state._halfShown && state.quarter>=3 && !this._pendingPAT) { state._halfShown=true; this.time.delayedCall(1600,()=>this._showHalftime()); return; }
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
     } else if (state.possession==='opp') {
@@ -750,7 +751,9 @@ export class FieldScene extends Phaser.Scene {
       });
     } else {
       this.time.delayedCall(1800, ()=>{
-        if (this._pendingPAT) { this._pendingPAT = false; this._showPATChoice(); return; }
+        if (this._pendingPAT) { this._pendingPAT=false; this._showPATChoice(); return; }
+        if (!state._halfShown && state.quarter>=3) { state._halfShown=true; this._showHalftime(); return; }
+        if ((state.plays===14&&!state._twoMin1)||(state.plays===38&&!state._twoMin2)) { if(state.plays===14)state._twoMin1=true; else state._twoMin2=true; this._showTwoMinWarning(()=>{ this._resetFormation(); this._drawLines(); const hud=this.scene.get('Hud'); hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team'); this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall'); }); return; }
         this._resetFormation(); this._drawLines();
         const hud = this.scene.get('Hud');
         hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
@@ -837,6 +840,7 @@ export class FieldScene extends Phaser.Scene {
     this.events.emit('playResult', result);
     const hud = this.scene.get('Hud');
     hud?.events?.emit('playResult', result); hud?.events?.emit('possessionChange','team');
+    if (!state._halfShown && state.quarter>=3) { state._halfShown=true; this.time.delayedCall(1600,()=>this._showHalftime()); return; }
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(2000, ()=>this.scene.start('GameOver'));
     } else {
@@ -858,6 +862,7 @@ export class FieldScene extends Phaser.Scene {
     this.events.emit('playResult', result);
     const hud = this.scene.get('Hud');
     hud?.events?.emit('playResult', result); hud?.events?.emit('possessionChange',state.possession);
+    if (!state._halfShown && state.quarter>=3) { state._halfShown=true; this.time.delayedCall(1600,()=>this._showHalftime()); return; }
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
     } else if (state.possession==='opp') {
@@ -880,6 +885,36 @@ export class FieldScene extends Phaser.Scene {
     const s=this.add.text(W/2,H/2+22,sub,{fontSize:'11px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(56);
     this.time.delayedCall(1300,()=>{
       this.tweens.add({targets:[bg,t,s],alpha:0,duration:380,onComplete:()=>{bg.destroy();t.destroy();s.destroy();cb();}});
+    });
+  }
+
+  _showHalftime() {
+    const W=this.scale.width, H=this.scale.height;
+    const t=state.team?.ab||'YOU', o=state.opponent?.ab||'OPP';
+    const bg=this.add.rectangle(W/2,H/2,W,H,0x0a0f1a,0.96).setDepth(62);
+    const ht=this.add.text(W/2,H/2-100,'HALFTIME',{fontSize:'38px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(63);
+    const sc=this.add.text(W/2,H/2-46,`${t}  ${state.score.team} — ${state.score.opp}  ${o}`,{fontSize:'26px',fontFamily:'monospace',fontStyle:'bold',color:'#f1f5f9'}).setOrigin(0.5).setDepth(63);
+    const rush=this.add.text(W/2,H/2+8,`Rush: ${state.stats.team.rushYds||0} yds  •  ${state.stats.opp.rushYds||0} yds`,{fontSize:'10px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(63);
+    const tds=this.add.text(W/2,H/2+28,`TDs: ${state.stats.team.td||0}  •  ${state.stats.opp.td||0}`,{fontSize:'10px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(63);
+    const sub=this.add.text(W/2,H/2+68,'2nd Half Kickoff',{fontSize:'11px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(63);
+    const els=[bg,ht,sc,rush,tds,sub];
+    Sound.whistle();
+    this.time.delayedCall(4000,()=>{
+      this.tweens.add({targets:els,alpha:0,duration:500,onComplete:()=>{
+        els.forEach(e=>e.destroy());
+        state.possession='team'; state.down=1; state.toGo=10;
+        this._startKickoffReturn();
+      }});
+    });
+  }
+
+  _showTwoMinWarning(cb) {
+    const W=this.scale.width, H=this.scale.height;
+    const bg=this.add.rectangle(W/2,H/2-60,W,52,0x1e293b,0.94).setDepth(62);
+    const t=this.add.text(W/2,H/2-60,'⏱ TWO-MINUTE WARNING',{fontSize:'16px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(63);
+    Sound.whistle();
+    this.time.delayedCall(2200,()=>{
+      this.tweens.add({targets:[bg,t],alpha:0,duration:400,onComplete:()=>{bg.destroy();t.destroy();cb();}});
     });
   }
 
