@@ -32,6 +32,7 @@ export class FieldScene extends Phaser.Scene {
     this._passRushActive = false;
     this._pocketBeaten = [false, false, false, false, false];
     this._passRushMode = false; this._passRushCoverBreak = false; this._blitzBtn = null; this._rushThrowTimer = null;
+    this._noHuddleActive = false; this._fadeEls = null;
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
@@ -321,7 +322,10 @@ export class FieldScene extends Phaser.Scene {
     if      (callId === 'punt')                              this._doPunt();
     else if (callId === 'fg')                                this._attemptFG();
     else if (callId.startsWith('run_') || callId === 'scramble') this._startRun(callId);
-    else if (callId.startsWith('pass_'))                    this._startPass(callId);
+    else if (callId.startsWith('pass_')) {
+      if (state.yardLine <= 15 && !this._noHuddleActive) this._showFadeOption(callId);
+      else this._startPass(callId);
+    }
   }
 
   _doPunt() {
@@ -1877,6 +1881,105 @@ export class FieldScene extends Phaser.Scene {
       if (k.dn.isDown||k.s.isDown||dp.dy>0) this.userDef.y+=dspd;
       this.userDef.y=clamp(this.userDef.y,FIELD_Y+10,FIELD_Y+FIELD_H-10);
       this._syncLbl(this.userDef);
+    }
+
+    // P28: FADE ROUTE — catch handled by button tap
+    if (this.phase === 'fade_route') { /* catch handled by button */ }
+  }
+
+  // ─── P28: RED ZONE FADE ROUTE ─────────────────────────────────────────────
+
+  _showFadeOption(callId) {
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const cleanup=()=>{ els.forEach(e=>e?.destroy?.()); clearTimeout(this._fadeAutoTimer); };
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(60));
+    els.push(this.add.text(W/2,H/2-60,'RED ZONE — PLAY CALL',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#ef4444',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
+    els.push(this.add.text(W/2,H/2-36,'Choose your play:',{fontSize:'10px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(61));
+    const mkBtn=(cx,cy,label,sub,hx,cb)=>{
+      const b=this.add.rectangle(cx,cy,160,60,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
+      const lbl=this.add.text(cx,cy-10,label,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);
+      const s=this.add.text(cx,cy+10,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);
+      b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{cleanup();cb();});
+      els.push(b,lbl,s);
+    };
+    mkBtn(W/2-90,H/2+14,'NORMAL PASS','Standard route',0x22c55e,()=>this._startPass(callId));
+    mkBtn(W/2+90,H/2+14,'🎯 FADE ROUTE','Corner route — timing catch',0xf59e0b,()=>this._startFadeRoute());
+    // Auto-dismiss to normal pass after 3s
+    const cdEl=this.add.text(W/2,H/2+60,'Auto: 3s',{fontSize:'9px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);
+    els.push(cdEl);
+    let rem=3000; const tick=()=>{
+      rem-=200; if(rem<=0){cleanup();this._startPass(callId);return;}
+      cdEl?.setText?.('Auto: '+(rem/1000).toFixed(1)+'s');
+      this._fadeAutoTimer=setTimeout(tick,200);
+    };
+    this._fadeAutoTimer=setTimeout(tick,200);
+  }
+
+  _startFadeRoute() {
+    this._noHuddleActive = true;
+    const cy = FIELD_Y + FIELD_H / 2;
+    const W = this.scale.width;
+    [...this.offPlayers, ...this.defPlayers].forEach(d => this._show(d, false));
+    this._show(this.qb, true); this._show(this.wr1, true); this._show(this.cb1, true);
+    const qbX = yardToX(Math.max(5, state.yardLine - 5));
+    this._place(this.qb,  qbX, cy);
+    this._place(this.wr1, yardToX(2), FIELD_Y + 10);
+    this._place(this.cb1, yardToX(2), FIELD_Y + 10);
+    this.qb._lbl?.setText('QB'); this.wr1._lbl?.setText('WR'); this.cb1._lbl?.setText('CB');
+    this.ball.x = this.qb.x; this.ball.y = this.qb.y;
+    this.phase = 'fade_route';
+    this._fadeEls = [];
+    const banner = this.add.text(W/2, FIELD_Y - 20, 'FADE — TAP CATCH WHEN BALL ARRIVES', {
+      fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#f59e0b', stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5).setDepth(20);
+    this._fadeEls.push(banner);
+    // Arc ball to WR corner over 1100ms
+    this.tweens.add({
+      targets: this.ball,
+      x: yardToX(2), y: FIELD_Y + 10,
+      duration: 1100,
+      ease: 'Sine.easeOut',
+      onUpdate: (tw) => {
+        const prog = tw.progress;
+        this.ball.y = Phaser.Math.Linear(this.qb.y, FIELD_Y + 10, prog) - Math.sin(prog * Math.PI) * 40;
+      }
+    });
+    // Show catch button after 900ms
+    let catchPressed = false;
+    this._fadeCatchTimer = this.time.delayedCall(900, () => {
+      if (this.phase !== 'fade_route') return;
+      const bx = W/2, by = FIELD_Y + FIELD_H / 2;
+      const bBg = this.add.rectangle(bx, by, 120, 36, 0xf97316).setDepth(21).setInteractive({useHandCursor:true});
+      const bTx = this.add.text(bx, by, '🤲 CATCH!', {fontSize:'13px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(22);
+      this._fadeEls.push(bBg, bTx);
+      bBg.once('pointerdown', () => { catchPressed = true; });
+    });
+    // Resolve after 1400ms
+    this._fadeResolveTimer = this.time.delayedCall(1400, () => {
+      if (this.phase !== 'fade_route') return;
+      this._resolveFade(catchPressed);
+    });
+  }
+
+  _resolveFade(caught) {
+    this._fadeEls?.forEach(e=>e?.destroy()); this._fadeEls=null;
+    this._noHuddleActive = false;
+    this.phase = 'result';
+    if (!caught) { Sound.incomplete(); this._endPlay({yards:0,text:'FADE — INCOMPLETE',type:'pass',turnover:false,td:false}); return; }
+    const wrOvr = (state.team?.players||[]).find(p=>p.pos==='WR')?.ovr || 75;
+    const cbOvr = (state.opponent?.players||[]).find(p=>['CB','S'].includes(p.pos))?.ovr || 75;
+    const catchCh = Math.min(0.85, Math.max(0.40, 0.60 + (wrOvr - cbOvr) * 0.008));
+    if (Math.random() < catchCh) {
+      Sound.td(); state.score.team += 6;
+      state.stats.team.recTD = (state.stats.team.recTD||0)+1;
+      this._tdFlash('TOUCHDOWN! FADE ROUTE 🙌','#22c55e');
+      this._endPlay({yards:state.yardLine,text:'TD — Fade route to the corner!',type:'td',turnover:false,td:true});
+    } else {
+      Sound.incomplete();
+      this._tdFlash('KNOCKED AWAY!','#ef4444');
+      this._endPlay({yards:0,text:'Fade — pass broken up in end zone',type:'pass',turnover:false,td:false});
     }
   }
 }
