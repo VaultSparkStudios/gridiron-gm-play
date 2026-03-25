@@ -32,7 +32,7 @@ export class FieldScene extends Phaser.Scene {
     this._passRushActive = false;
     this._pocketBeaten = [false, false, false, false, false];
     this._passRushMode = false; this._passRushCoverBreak = false; this._blitzBtn = null; this._rushThrowTimer = null;
-    this._noHuddleActive = false; this._fadeEls = null;
+    this._noHuddleActive = false; this._fadeEls = null; this._trickEls = null;
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
@@ -321,7 +321,10 @@ export class FieldScene extends Phaser.Scene {
     }
     if      (callId === 'punt')                              this._doPunt();
     else if (callId === 'fg')                                this._attemptFG();
-    else if (callId.startsWith('run_') || callId === 'scramble') this._startRun(callId);
+    else if (callId.startsWith('run_') || callId === 'scramble') {
+      if (callId.startsWith('run_') && !this._noHuddleActive && Math.random() < 0.15) this._showTrickOption(callId);
+      else this._startRun(callId);
+    }
     else if (callId.startsWith('pass_')) {
       if (state.yardLine <= 15 && !this._noHuddleActive) this._showFadeOption(callId);
       else this._startPass(callId);
@@ -1915,6 +1918,80 @@ export class FieldScene extends Phaser.Scene {
       this._fadeAutoTimer=setTimeout(tick,200);
     };
     this._fadeAutoTimer=setTimeout(tick,200);
+  }
+
+  // ─── P29: TRICK PLAY ──────────────────────────────────────────────────────
+
+  _showTrickOption(callId) {
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const cleanup=()=>{ els.forEach(e=>e?.destroy?.()); clearTimeout(this._trickAutoTimer); };
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(60));
+    els.push(this.add.text(W/2,H/2-60,'TRICK PLAY — PRE-SNAP',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#a78bfa',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
+    els.push(this.add.text(W/2,H/2-36,'Catch the defense off guard:',{fontSize:'10px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(61));
+    const mkBtn=(cx,cy,label,sub,hx,cb)=>{
+      const b=this.add.rectangle(cx,cy,160,60,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
+      const lbl=this.add.text(cx,cy-10,label,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);
+      const s=this.add.text(cx,cy+10,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);
+      b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{cleanup();cb();});
+      els.push(b,lbl,s);
+    };
+    mkBtn(W/2-90,H/2+14,'NORMAL RUN','Standard carry',0x22c55e,()=>this._startRun(callId));
+    mkBtn(W/2+90,H/2+14,'🎭 TRICK PLAY','Reverse / flea flicker',0xa78bfa,()=>this._startTrickPlay());
+    const cdEl=this.add.text(W/2,H/2+60,'Auto: 3s',{fontSize:'9px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);
+    els.push(cdEl);
+    let rem=3000; const tick=()=>{
+      rem-=200; if(rem<=0){cleanup();this._startRun(callId);return;}
+      cdEl?.setText?.('Auto: '+(rem/1000).toFixed(1)+'s');
+      this._trickAutoTimer=setTimeout(tick,200);
+    };
+    this._trickAutoTimer=setTimeout(tick,200);
+  }
+
+  _startTrickPlay() {
+    const cy=FIELD_Y+FIELD_H/2, W=this.scale.width, H=this.scale.height;
+    [...this.offPlayers,...this.defPlayers].forEach(d=>this._show(d,false));
+    this._show(this.qb,true); this._show(this.rb,true); this._show(this.wr1,true);
+    const qbX=yardToX(Math.max(5,state.yardLine-5));
+    this._place(this.qb,qbX,cy); this._place(this.rb,qbX-20,cy+22); this._place(this.wr1,qbX+50,cy-35);
+    this.qb._lbl?.setText('QB'); this.rb._lbl?.setText('RB'); this.wr1._lbl?.setText('WR');
+    this.ball.x=this.qb.x; this.ball.y=this.qb.y;
+    this.phase='trick_play'; this._trickEls=[];
+    const banner=this.add.text(W/2,FIELD_Y-20,'🎭 TRICK PLAY — PITCH IT!',{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#a78bfa',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(20);
+    this._trickEls.push(banner);
+    // Handoff QB→RB (400ms), pitch RB→WR (400ms), WR runs reverse
+    this.tweens.add({targets:this.ball,x:this.rb.x,y:this.rb.y,duration:400,ease:'Linear',onComplete:()=>{
+      this.tweens.add({targets:this.ball,x:this.wr1.x,y:this.wr1.y,duration:350,ease:'Linear'});
+      this.tweens.add({targets:this.wr1,x:yardToX(state.yardLine+18),y:cy-35,duration:700,delay:350});
+      this._syncLbl(this.rb); this._syncLbl(this.wr1);
+    }});
+    this.tweens.add({targets:this.rb,x:qbX-5,y:cy+22,duration:400,ease:'Linear'});
+    let pitchPressed=false;
+    // PITCH! button at 650ms
+    this._trickPitchTimer=this.time.delayedCall(650,()=>{
+      const btn=this.add.text(W/2,H/2+30,'🏈 PITCH!',{fontSize:'20px',fontFamily:'monospace',fontStyle:'bold',color:'#a78bfa',backgroundColor:'#1e1b4b',padding:{x:16,y:10},stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(25).setInteractive({useHandCursor:true});
+      btn.on('pointerdown',()=>{pitchPressed=true;btn.destroy();});
+      this._trickEls.push(btn);
+    });
+    // Resolve at 1450ms
+    this._trickResolveTimer=this.time.delayedCall(1450,()=>{
+      if(this._trickEls){this._trickEls.forEach(e=>e?.destroy?.());this._trickEls=null;}
+      this._resolveTrickPlay(pitchPressed);
+    });
+  }
+
+  _resolveTrickPlay(pitchPressed) {
+    const roll=Math.random();
+    const bigT=pitchPressed?0.64:0.50;
+    const midT=pitchPressed?0.90:0.80;
+    let yards,text;
+    if(roll<bigT){yards=Phaser.Math.Between(15,34);text=`🎭 REVERSE! Big gain — ${yards} yards!`;Sound.complete?.();}
+    else if(roll<midT){yards=Phaser.Math.Between(3,11);text=`Trick play — ${yards} yard gain`;}
+    else{yards=-Phaser.Math.Between(3,6);text=`Trick play sniffed out! ${yards} yards`;}
+    const td=yards>0&&state.yardLine-yards<=0;
+    if(td){Sound.td?.();this._tdFlash('TOUCHDOWN! 🎭','#a78bfa');}
+    this._endPlay({yards,text,type:'run',turnover:false,td});
   }
 
   _startFadeRoute() {
