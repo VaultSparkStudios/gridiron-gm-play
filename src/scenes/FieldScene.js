@@ -404,7 +404,17 @@ export class FieldScene extends Phaser.Scene {
     Sound.tackle();
     if (this._jukeCDBar) { this._jukeCDBar.destroy(); this._jukeCDBar = null; }
     this.tweens.add({ targets: this.runner, scaleX: 0.65, scaleY: 0.65, duration: 180, yoyo: true });
-    this._resolvePlay(1.0, 'tackle', Math.round((this.runner.x - this.startX) / YARD_W));
+    const yards = Math.round((this.runner.x - this.startX) / YARD_W);
+    const rb = (state.team?.players || []).find(p => p.pos === 'RB') || { str: 70 };
+    const fumCh = Math.max(0.02, 0.055 - (rb.str - 70) * 0.0006);
+    if (Math.random() < fumCh) {
+      Sound.incomplete();
+      state.stats.team.fum = (state.stats.team.fum || 0) + 1;
+      this._tdFlash('FUMBLE!', '#ef4444');
+      this._endPlay({ yards: 0, text: 'FUMBLE! Possession lost.', type: 'fumble', turnover: true, td: false });
+      return;
+    }
+    this._resolvePlay(1.0, 'tackle', yards);
   }
 
   // ─── PASS GAME ────────────────────────────────────────────────────────────
