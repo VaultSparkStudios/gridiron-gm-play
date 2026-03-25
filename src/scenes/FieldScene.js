@@ -67,6 +67,10 @@ export class FieldScene extends Phaser.Scene {
     this._defFormation = '4-3'; this._defFormElems = [];
     // P59-P63 flags
     this._isOT = false; this._wind = null; this._stackItEls = []; this._stackItBonus = false;
+    // P64-P68 flags
+    this._hurryUpEls = []; this._hurryUpActive = false; this._routeTreeEls = []; this._routeTreeChoice = null;
+    this._rushLaneEls = []; this._rushLaneBonus = null;
+    this._checkdownActive = false; this._fadeBtnEls = [];
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
@@ -992,6 +996,11 @@ export class FieldScene extends Phaser.Scene {
 
   _buildReceiverTargets(isPlayAction = false) {
     if (this.phase !== 'pass_wait') return;
+    // P65: show route tree selector
+    if(state.possession==='team') this.time.delayedCall(100,()=>this._showRouteTree());
+    // P67: mark checkdown window open for 0.5s after receivers appear
+    this._checkdownActive=true;
+    this.time.delayedCall(500,()=>{this._checkdownActive=false;});
     const dc = state.opponent?.dcScheme || '4-3';
     const isZone   = dc==='Cover 2' || dc==='Zone Blitz';
     const dbRatings = (state.opponent?.players||[]).filter(p=>['CB','S'].includes(p.pos)).map(p=>p.ovr);
@@ -1049,6 +1058,19 @@ export class FieldScene extends Phaser.Scene {
 
   _throwTo(receiverDot, isOpen) {
     if (this.phase!=='pass_wait') return;
+    // P67: QB Checkdown Under Pressure — if thrown within 0.5s of receivers appearing, guarantee short gain
+    if(this._checkdownActive){
+      this._checkdownActive=false;
+      this.phase='result';
+      const cdYds=Phaser.Math.Between(1,6);
+      this._clearPassRush();
+      this.recTargets?.forEach(r=>r?.destroy?.());this.recTargets=[];
+      this.pressureTxt?.destroy();
+      Sound.whistle?.();
+      this._tdFlash('CHECKDOWN! +'+cdYds,'#22c55e');
+      this._endPlay({yards:cdYds,text:'QB checkdown under pressure — '+cdYds+' yards',type:'pass',turnover:false,td:state.yardLine+cdYds>=100});
+      return;
+    }
     this.phase = 'pass_flight';
     this._clearPassRush();
     this.recTargets.forEach(r=>r?.destroy?.()); this.recTargets=[];
@@ -1110,7 +1132,10 @@ export class FieldScene extends Phaser.Scene {
         // P55: defensive formation coverage/sack bonus
         const defForm = DEF_FORMATIONS[this._defFormation] || DEF_FORMATIONS['4-3'];
         intCh = Math.max(0.01, intCh - defForm.coverageBonus * 0.5);
-        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus)*wxPassM, 0.22, 0.88);
+        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty)*wxPassM, 0.22, 0.88);
+        // P64: Hurry-up -5% comp penalty
+        const _hurryPenalty = this._hurryUpActive ? -0.05 : 0;
+        this._hurryUpActive = false;
         // P54: QB reads modifier
         const qbRead = this._qbReadChoice || 'primary';
         if (qbRead === 'checkdown') { compCh = Math.min(0.92, compCh + 0.15); }
@@ -1140,6 +1165,12 @@ export class FieldScene extends Phaser.Scene {
         if (qbRead === 'checkdown') base = Math.round(base * 0.6);
         else if (qbRead === 'go_route') base = Math.round(base * 1.8);
         this._qbReadChoice = 'primary'; // reset
+        // P65: Route tree choice modifiers
+        if(this._routeTreeChoice){
+          compCh=clamp(compCh+this._routeTreeChoice.compMod,0.08,0.94);
+          base=Math.round(base*this._routeTreeChoice.yardMod);
+          this._routeTreeChoice=null;
+        }
         yards = Math.round(base * qteBonus);
       }
     }
@@ -1268,6 +1299,14 @@ export class FieldScene extends Phaser.Scene {
         this._resetFormation(); this._drawLines();
         const hud = this.scene.get('Hud');
         hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
+        // P64: Hurry-Up offer after incomplete pass
+        if(state.lastResult?.type==='inc'&&state.possession==='team'){
+          this.time.delayedCall(200,()=>this._showHurryUp());
+        }
+        // P68: Red Zone Fade button on 3rd/4th & 5+ inside 25
+        if(state.possession==='team'&&state.yardLine>=75&&state.down>=3&&state.toGo>=5){
+          this.time.delayedCall(300,()=>this._showFadeRoute());
+        }
         // P53: clock management takes priority in Q4 comeback even over drill mode
         const _q4Comeback = state.quarter>=4 && (state.score.opp-state.score.team)>=1 && (state.score.opp-state.score.team)<=8 && (state.lastResult?.type==='run'||state.lastResult?.type==='inc');
         if (_q4Comeback) {
@@ -1514,6 +1553,9 @@ export class FieldScene extends Phaser.Scene {
     hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','opp');
     Sound.whistle();
     this._passRushMode = false; this._passRushCoverBreak = false;
+    // P66: Rush Lane choice
+    this._rushLaneBonus = null;
+    this.time.delayedCall(100,()=>this._showRushLane());
     // Blitz button (top-right)
     const bx=W-52, by=FIELD_Y+18;
     const bBg=this.add.rectangle(bx,by,80,28,0xea580c).setDepth(21).setInteractive({useHandCursor:true});
@@ -1539,7 +1581,11 @@ export class FieldScene extends Phaser.Scene {
   _checkRushResult() {
     if (this.phase !== 'ai_pass') return;
     const dist = Math.hypot(this.userDef.x - this.dl.x, this.userDef.y - this.dl.y);
-    if (dist < 22) {
+    // P66: apply rush lane sack bonus
+    const _rlSackBonus = this._rushLaneBonus?.sackCh||0;
+    const _rlCovBonus = this._rushLaneBonus?.covCh||0;
+    this._rushLaneBonus=null;
+    if (dist < 22 || (dist < 40 && _rlSackBonus>0 && Math.random()<_rlSackBonus)) {
       this.phase = 'result';
       Sound.tackle?.() || Sound.whistle?.();
       this._tdFlash('SACK! QB DOWN 🏈','#22c55e');
@@ -3214,4 +3260,112 @@ export class FieldScene extends Phaser.Scene {
     bg.on('pointerdown',()=>{if(this.phase!=='ai_run')return;cleanup();this._stackItBonus=true;const fl=this.add.text(W/2,H/2-20,'STACKED! 💪',{fontSize:'20px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(35);this.tweens.add({targets:fl,alpha:0,y:fl.y-30,duration:900,onComplete:()=>fl?.destroy?.()});});
     let rem=1200;const tick=()=>{rem-=200;if(rem<=0||this.phase!=='ai_run'){cleanup();return;}cd.setText((rem/1000).toFixed(1)+'s');this.time.delayedCall(200,tick);};this.time.delayedCall(200,tick);
   }
+  // ─── P64: No-Huddle Hurry-Up ───────────────────────────────────────────────
+  _showHurryUp() {
+    if(state.possession!=='team'||this.phase!=='presnap')return;
+    const W=this.scale.width,H=this.scale.height;
+    const els=this._hurryUpEls;
+    const cleanup=()=>{els.forEach(e=>e?.destroy?.());this._hurryUpEls=[];};
+    const bg=this.add.rectangle(W/2,H-100,240,46,0xd97706,0.92).setDepth(32).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W/2,H-108,'\u26a1 HURRY-UP! (-5% comp)',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#000'}).setOrigin(0.5).setDepth(33);
+    const st=this.add.text(W/2,H-92,'Snap fast \u2014 saves 15s',{fontSize:'7px',fontFamily:'monospace',color:'#1c1917'}).setOrigin(0.5).setDepth(33);
+    els.push(bg,tx,st);this._hurryUpEls=els;
+    let rem=2200;const tick=()=>{rem-=200;if(rem<=0||this.phase!=='presnap'){cleanup();return;}this.time.delayedCall(200,tick);};this.time.delayedCall(200,tick);
+    bg.on('pointerover',()=>bg.setFillStyle(0xb45309,0.95));bg.on('pointerout',()=>bg.setFillStyle(0xd97706,0.92));
+    bg.on('pointerdown',()=>{
+      cleanup();
+      state.plays=Math.max(0,(state.plays||0)-1);
+      [this.cb1,this.cb2,this.lb].forEach(d=>{if(d?.visible){d.x+=(Math.random()-0.5)*22;d.y+=(Math.random()-0.5)*22;this._syncLbl(d);}});
+      this._hurryUpActive=true;
+      this._tdFlash('\u26a1 HURRY-UP SNAP',0xd97706);
+      this.scene.launch('PlayCall');this.scene.bringToTop('PlayCall');
+    });
+  }
+
+  // ─── P65: Receiver Route Tree ──────────────────────────────────────────────────
+  _showRouteTree() {
+    if(state.possession!=='team'||this.phase!=='pass_wait')return;
+    if(this._routeTreeEls.length>0)return;
+    const W=this.scale.width,H=this.scale.height;
+    const els=[];
+    const cleanup=()=>{els.forEach(e=>e?.destroy?.());this._routeTreeEls=[];};
+    const routes=[
+      {label:'CURL',compMod:+0.08,yardMod:0.75,color:0x22c55e},
+      {label:'POST',compMod:+0.02,yardMod:1.20,color:0x3b82f6},
+      {label:'CORNER',compMod:-0.05,yardMod:1.35,color:0xf59e0b},
+      {label:'GO',compMod:-0.12,yardMod:1.70,color:0xef4444},
+    ];
+    const bg=this.add.rectangle(W/2,H-88,W*0.9,52,0x0f172a,0.88).setDepth(28);
+    const ht=this.add.text(W/2,H-110,'ROUTE TREE',{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#94a3b8'}).setOrigin(0.5).setDepth(29);
+    els.push(bg,ht);
+    routes.forEach((r,i)=>{
+      const bx=W*0.14+i*(W*0.24);
+      const rb=this.add.rectangle(bx,H-88,W*0.22,36,r.color,0.22).setDepth(29).setInteractive({useHandCursor:true});
+      const rt=this.add.text(bx,H-91,r.label,{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(30);
+      const rs=this.add.text(bx,H-79,(r.compMod>0?'+':'')+Math.round(r.compMod*100)+'% comp',{fontSize:'7px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(30);
+      rb.on('pointerover',()=>rb.setAlpha(0.55));rb.on('pointerout',()=>rb.setAlpha(1));
+      rb.on('pointerdown',()=>{
+        if(this.phase!=='pass_wait')return;
+        this._routeTreeChoice={...r};
+        cleanup();
+        this._tdFlash(r.label+' ROUTE',r.color);
+      });
+      els.push(rb,rt,rs);
+    });
+    this._routeTreeEls=els;
+    this.time.delayedCall(3000,()=>cleanup());
+  }
+
+  // ─── P66: Defensive Pass Rush Lane ─────────────────────────────────────────────
+  _showRushLane() {
+    if(state.possession!=='opp'||this.phase!=='ai_pass')return;
+    const W=this.scale.width,H=this.scale.height;
+    const els=[];
+    const cleanup=()=>{els.forEach(e=>e?.destroy?.());this._rushLaneEls=[];};
+    const bg=this.add.rectangle(W/2,H/2-50,280,64,0x0f172a,0.90).setDepth(50);
+    const ht=this.add.text(W/2,H/2-74,'\U0001f3c8 PASS RUSH LANE',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#f97316',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(51);
+    els.push(bg,ht);
+    [{label:'INSIDE\nRUSH',mod:{sackCh:+0.12,covCh:-0.06},color:0xef4444},
+     {label:'OUTSIDE\nRUSH',mod:{sackCh:+0.04,covCh:+0.08},color:0x3b82f6}
+    ].forEach((lane,i)=>{
+      const bx=W/2-70+i*140;
+      const rb=this.add.rectangle(bx,H/2-44,120,44,lane.color,0.22).setDepth(51).setInteractive({useHandCursor:true});
+      const rt=this.add.text(bx,H/2-44,lane.label,{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',align:'center'}).setOrigin(0.5).setDepth(52);
+      rb.on('pointerover',()=>rb.setAlpha(0.55));rb.on('pointerout',()=>rb.setAlpha(1));
+      rb.on('pointerdown',()=>{this._rushLaneBonus=lane.mod;cleanup();this._tdFlash(lane.label.replace('\\n',' '),lane.color);});
+      els.push(rb,rt);
+    });
+    this._rushLaneEls=els;
+    this.time.delayedCall(2000,()=>cleanup());
+  }
+
+  // ─── P68: Red Zone Fade to Corner ────────────────────────────────────────────
+  _showFadeRoute() {
+    if(state.possession!=='team')return;
+    if(state.yardLine<75||(state.down<3)||(state.toGo<5))return;
+    if(this._fadeBtnEls.length>0)return;
+    const W=this.scale.width,H=this.scale.height;
+    const els=[];
+    const cleanup=()=>{els.forEach(e=>e?.destroy?.());this._fadeBtnEls=[];};
+    const bg=this.add.rectangle(W*0.82,FIELD_Y+32,130,38,0x7c3aed,0.90).setDepth(28).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W*0.82,FIELD_Y+28,'\u2728 FADE ROUTE',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#e9d5ff',stroke:'#000',strokeThickness:1}).setOrigin(0.5).setDepth(29);
+    const st=this.add.text(W*0.82,FIELD_Y+40,'RZ corner fade',{fontSize:'7px',fontFamily:'monospace',color:'#a78bfa'}).setOrigin(0.5).setDepth(29);
+    els.push(bg,tx,st);this._fadeBtnEls=els;
+    bg.on('pointerover',()=>bg.setFillStyle(0x6d28d9,0.95));bg.on('pointerout',()=>bg.setFillStyle(0x7c3aed,0.90));
+    bg.on('pointerdown',()=>{
+      cleanup();
+      if(this.phase!=='presnap')return;
+      const wrData=state.team?.players?.find(p=>p.pos==='WR')||{ovr:80};
+      const cbData=state.opponent?.players?.find(p=>p.pos==='CB')||{ovr:78};
+      const catchCh=0.48+((wrData.ovr||80)-(cbData.ovr||78))*0.005;
+      const caught=Math.random()<catchCh;
+      const td=caught&&(state.yardLine+Phaser.Math.Between(18,28)>=100);
+      this.phase='result';
+      if(td){Sound.td?.();this._tdFlash('FADE TD! \u2728','#a78bfa');this._endPlay({yards:100-state.yardLine,text:'FADE ROUTE TOUCHDOWN! Corner of the endzone!',type:'td',turnover:false,td:true});}
+      else if(caught){const fy=Phaser.Math.Between(12,Math.min(24,100-state.yardLine-1));this._endPlay({yards:fy,text:'Fade complete \u2014 '+fy+' yard gain to the corner',type:'pass',turnover:false,td:false});}
+      else{Sound.incomplete?.();this._endPlay({yards:0,text:'FADE \u2014 incomplete. CB had great coverage.',type:'inc',turnover:false,td:false});}
+    });
+    this.time.delayedCall(4500,()=>cleanup());
+  }
+
 }
