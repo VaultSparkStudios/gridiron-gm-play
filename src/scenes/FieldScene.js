@@ -31,6 +31,7 @@ export class FieldScene extends Phaser.Scene {
     this._lastReceiver = null;
     this._passRushActive = false;
     this._pocketBeaten = [false, false, false, false, false];
+    this._passRushMode = false; this._passRushCoverBreak = false; this._blitzBtn = null; this._rushThrowTimer = null;
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
@@ -1262,7 +1263,45 @@ export class FieldScene extends Phaser.Scene {
     const hud=this.scene.get('Hud');
     hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','opp');
     Sound.whistle();
-    this.time.delayedCall(720, ()=>{ if(this.phase==='ai_pass') this._aiThrow(); });
+    this._passRushMode = false; this._passRushCoverBreak = false;
+    // Blitz button (top-right)
+    const bx=W-52, by=FIELD_Y+18;
+    const bBg=this.add.rectangle(bx,by,80,28,0xea580c).setDepth(21).setInteractive({useHandCursor:true});
+    const bTx=this.add.text(bx,by,'⚡ BLITZ',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(22);
+    this._blitzBtn=[bBg,bTx];
+    const destroyBlitz=()=>{ if(this._blitzBtn){this._blitzBtn.forEach(e=>e?.destroy());this._blitzBtn=null;} };
+    bBg.once('pointerdown',()=>this._activatePassRush());
+    this._rushThrowTimer = this.time.delayedCall(720, ()=>{ destroyBlitz(); if(this.phase==='ai_pass'&&!this._passRushMode) this._aiThrow(); });
+  }
+
+  _activatePassRush() {
+    if (this._blitzBtn) { this._blitzBtn.forEach(e=>e?.destroy()); this._blitzBtn=null; }
+    this._passRushMode = true;
+    this._rushThrowTimer?.remove();
+    this._rushThrowTimer = this.time.delayedCall(1500, ()=>{ if(this.phase==='ai_pass') this._checkRushResult(); });
+    const W=this.scale.width;
+    const h=this.add.text(W/2, FIELD_Y+42, 'RUSH THE QB — WASD', {
+      fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#f97316', stroke:'#000', strokeThickness:2
+    }).setOrigin(0.5).setDepth(20);
+    this.time.delayedCall(1400, ()=>h?.destroy());
+  }
+
+  _checkRushResult() {
+    if (this.phase !== 'ai_pass') return;
+    const dist = Math.hypot(this.userDef.x - this.dl.x, this.userDef.y - this.dl.y);
+    if (dist < 22) {
+      this.phase = 'result';
+      Sound.tackle?.() || Sound.whistle?.();
+      this._tdFlash('SACK! QB DOWN 🏈','#22c55e');
+      this.aiDown++; this.aiToGo = Math.min(this.aiToGo+8, 30);
+      state.stats.team.sacks = (state.stats.team.sacks||0)+1;
+      const sackYards = Phaser.Math.Between(5,12);
+      this._resolveAIPlay(-sackYards);
+    } else {
+      this._passRushCoverBreak = true;
+      this._aiThrow();
+    }
+    this._passRushMode = false;
   }
 
   _aiThrow() {
@@ -1283,7 +1322,8 @@ export class FieldScene extends Phaser.Scene {
     this.phase='result'; this._clearArc();
     const call=this._defCall||'cover2';
     const defDist=Math.hypot(this.rb.x-rec.dot.x, this.rb.y-rec.dot.y);
-    const intThresh=call==='man'?56:call==='cover2'?44:32;
+    const intThresh=(call==='man'?56:call==='cover2'?44:32)-(this._passRushCoverBreak?20:0);
+    this._passRushCoverBreak=false;
     if(defDist<intThresh){
       Sound.int();
       state.stats.team.int=(state.stats.team.int||0)+1;
@@ -1830,7 +1870,7 @@ export class FieldScene extends Phaser.Scene {
 
     // AI POSSESSION — user covers receiver during pass play
     if (this.phase === 'ai_pass') {
-      const dspd = this._defSpd*dt;
+      const dspd = (this._defSpd + (this._passRushMode ? 12 : 0)) * dt;
       if (k.rt.isDown||k.d.isDown||dp.dx>0) this.userDef.x+=dspd;
       if (k.lt.isDown||k.a.isDown||dp.dx<0) this.userDef.x-=dspd*0.9;
       if (k.up.isDown||k.w.isDown||dp.dy<0) this.userDef.y-=dspd;
