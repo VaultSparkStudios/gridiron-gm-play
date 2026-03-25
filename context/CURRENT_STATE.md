@@ -4,7 +4,7 @@
 
 - Date: 2026-03-25
 - Overall status: Live on GitHub Pages, active development
-- Current version: P73 — full backlog complete (paired with gridiron-gm v10.0)
+- Current version: P78 — full backlog complete (paired with gridiron-gm v11.0)
 
 ## What exists
 

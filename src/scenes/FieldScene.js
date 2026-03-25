@@ -74,6 +74,8 @@ export class FieldScene extends Phaser.Scene {
     // P69-P73 flags
     this._piChecked = false; this._hurryUpDef = 0; this._motionActive = false; this._motionUsed = false; this._motionBtn = null; this._motionEls = [];
     this._thirdDownAtt = 0; this._thirdDownConv = 0; this._thirdHUD = null; this._thirdHUDTxt = null;
+    // P74-P78 flags
+    this._bumpCovEls = []; this._slideEls = []; this._rzRunEls = []; this._penaltyEls = []; this._twoMinFired1 = false; this._twoMinFired2 = false;
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
@@ -622,6 +624,10 @@ export class FieldScene extends Phaser.Scene {
 
     Sound.whistle();
     this.events.emit('phaseChange', 'run');
+    // P75: Scramble Slide option inside own 20
+    if(isScramble && state.yardLine<=20){ this.time.delayedCall(200,()=>this._showSlideOption()); }
+    // P76: Red Zone Run Option inside opp 20
+    if(!isScramble && state.yardLine>=80){ this.time.delayedCall(200,()=>this._showRZRunChoice()); }
   }
 
   // 5-man OL: each lineman blocks assigned defender
@@ -1298,6 +1304,11 @@ export class FieldScene extends Phaser.Scene {
     if(!this._challengeUsed && result.turnover && (result.type==='int'||result.type==='fumble')) {
       this.time.delayedCall(600, ()=>this._showChallengeOption());
     }
+    // P77: Penalty flag — 3% chance on AI plays, show Accept/Decline
+    if(state.possession==='opp'&&!result.td&&!result.turnover&&Math.random()<0.03){
+      this.time.delayedCall(400,()=>this._showPenaltyChoice('OFFENSIVE HOLDING',10,'team'));
+      return;
+    }
     this._afterPlay();
   }
 
@@ -1577,6 +1588,8 @@ export class FieldScene extends Phaser.Scene {
     // P66: Rush Lane choice
     this._rushLaneBonus = null;
     this.time.delayedCall(100,()=>this._showRushLane());
+    // P74: Bump Coverage
+    this.time.delayedCall(120,()=>this._showBumpCoverage());
     // Blitz button (top-right)
     const bx=W-52, by=FIELD_Y+18;
     const bBg=this.add.rectangle(bx,by,80,28,0xea580c).setDepth(21).setInteractive({useHandCursor:true});
@@ -1913,10 +1926,18 @@ export class FieldScene extends Phaser.Scene {
 
   _showTwoMinWarning(cb) {
     const W=this.scale.width, H=this.scale.height;
+    // P78: quarter-aware label
+    const qLbl=state.quarter<=2?'HALF':'GAME';
     const bg=this.add.rectangle(W/2,H/2-60,W,52,0x1e293b,0.94).setDepth(62);
-    const t=this.add.text(W/2,H/2-60,'⏱ TWO-MINUTE WARNING',{fontSize:'16px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(63);
+    const t=this.add.text(W/2,H/2-60,`⏱ TWO-MINUTE WARNING — ${qLbl}`,{fontSize:'14px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(63);
+    // P78: free clock save button
+    const toBtn=this.add.rectangle(W/2,H/2-32,160,22,0x0ea5e9,1).setDepth(64).setInteractive({useHandCursor:true});
+    const toTxt=this.add.text(W/2,H/2-32,'⏰ FREE TIMEOUT — SAVE CLOCK',{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(65);
+    let saved=false;
+    toBtn.once('pointerdown',()=>{saved=true;this._tdFlash('⏰ TIMEOUT SAVED — CLOCK STOPPED','#0ea5e9');toBtn.destroy();toTxt.destroy();});
     Sound.whistle();
-    this.time.delayedCall(2200,()=>{
+    this.time.delayedCall(2800,()=>{
+      if(!saved){toBtn.destroy();toTxt.destroy();}
       this.tweens.add({targets:[bg,t],alpha:0,duration:400,onComplete:()=>{bg.destroy();t.destroy();state._drillMode=true;cb();}});
     });
   }
@@ -3529,6 +3550,86 @@ export class FieldScene extends Phaser.Scene {
     this._checkComebackMode();
     const text=td?`🏈 SIDELINE TOUCHDOWN!`:(caught?`Sideline catch — ${yards} yds (clock stops)`:'Sideline route — incomplete');
     this._endPlay({yards:yards||0,text,type:td?'td':'pass',turnover:false,td,clockStop:caught&&!td});
+  }
+
+  // ─── P74: Defensive Back Bump Coverage ───
+  _showBumpCoverage() {
+    if(this.phase!=='ai_pass')return;
+    const W=this.scale.width;
+    const bg=this.add.rectangle(W-62,FIELD_Y+52,100,24,0x7c3aed,1).setDepth(23).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W-62,FIELD_Y+52,'💢 BUMP!',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',stroke:'#000',strokeThickness:1}).setOrigin(0.5).setDepth(24);
+    this._bumpCovEls=[bg,tx];
+    const destroy=()=>{this._bumpCovEls.forEach(e=>e?.destroy());this._bumpCovEls=[];};
+    bg.once('pointerdown',()=>{
+      destroy();
+      // Bump: push receiver off route, +20% INT chance this play
+      const rec=this._aiRecTarget;
+      if(rec&&rec.dot){rec.dot.x+=Phaser.Math.Between(12,24);rec.dot.y+=(Math.random()-0.5)*30;this._syncLbl(rec.dot);}
+      this._passRushCoverBreak=true;
+      this._tdFlash('💢 DB BUMP — route disrupted','#7c3aed');
+    });
+    this.time.delayedCall(680,()=>destroy());
+  }
+
+  // ─── P75: Scramble Slide ───
+  _showSlideOption() {
+    if(this.phase!=='run')return;
+    const W=this.scale.width,H=this.scale.height;
+    const bg=this.add.rectangle(W/2,H/2+54,140,26,0x0ea5e9,1).setDepth(23).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W/2,H/2+54,'🛸 SLIDE — Protect QB',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',stroke:'#000',strokeThickness:1}).setOrigin(0.5).setDepth(24);
+    this._slideEls=[bg,tx];
+    const destroy=()=>{this._slideEls.forEach(e=>e?.destroy());this._slideEls=[];};
+    bg.once('pointerdown',()=>{
+      destroy();
+      if(this.phase!=='run')return;
+      // Slide: end run early, gain current distance but no fumble risk, QB safe
+      const dist=Math.max(0,this.runner.x-this.startX);
+      const pxPerYd=(this.scale.width)/100;
+      const rawYds=Math.min(Math.round(dist/pxPerYd),4);
+      this._tdFlash(`🛸 QB SLIDE — ${rawYds} yds`,'#0ea5e9');
+      this._resolvePlay(1.0,'run',rawYds);
+    });
+    this.time.delayedCall(1200,()=>destroy());
+  }
+
+  // ─── P76: Red Zone Run Option ───
+  _showRZRunChoice() {
+    if(this.phase!=='run')return;
+    const W=this.scale.width,H=this.scale.height;
+    const bg=this.add.rectangle(W/2,H/2+80,210,26,0xea580c,1).setDepth(23);
+    const tx=this.add.text(W/2,H/2+80,'RED ZONE — 🏋️ DIVE  |  💨 SWEEP',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',stroke:'#000',strokeThickness:1}).setOrigin(0.5).setDepth(24);
+    const dBg=this.add.rectangle(W/2-55,H/2+80,96,26,0xef4444,0).setDepth(25).setInteractive({useHandCursor:true});
+    const sBg=this.add.rectangle(W/2+55,H/2+80,96,26,0x22c55e,0).setDepth(25).setInteractive({useHandCursor:true});
+    this._rzRunEls=[bg,tx,dBg,sBg];
+    const destroy=()=>{this._rzRunEls.forEach(e=>e?.destroy());this._rzRunEls=[];};
+    dBg.once('pointerdown',()=>{ destroy(); this._tdFlash('🏋️ POWER DIVE','#ef4444'); if(this._resolvePlay)this._rzRunBonus={type:'dive',bonus:0.12}; });
+    sBg.once('pointerdown',()=>{ destroy(); this._tdFlash('💨 SWEEP OUTSIDE','#22c55e'); if(this._resolvePlay)this._rzRunBonus={type:'sweep',bonus:0.08}; });
+    this.time.delayedCall(1500,()=>destroy());
+  }
+
+  // ─── P77: Penalty Accept/Decline ───
+  _showPenaltyChoice(penaltyName,yards,beneficiary) {
+    const W=this.scale.width,H=this.scale.height;
+    const bg=this.add.rectangle(W/2,H/2-20,W*0.9,80,0x1e293b,0.96).setDepth(50).setStrokeStyle(2,0xfde047);
+    const hd=this.add.text(W/2,H/2-54,'🚩 FLAG ON THE PLAY',{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#fde047'}).setOrigin(0.5).setDepth(51);
+    const nm=this.add.text(W/2,H/2-38,`${penaltyName} — ${yards} yds`,{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(51);
+    const aBg=this.add.rectangle(W/2-50,H/2-10,88,22,0x22c55e,1).setDepth(52).setInteractive({useHandCursor:true});
+    const aTx=this.add.text(W/2-50,H/2-10,'✅ ACCEPT',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(53);
+    const dBg=this.add.rectangle(W/2+50,H/2-10,88,22,0xef4444,1).setDepth(52).setInteractive({useHandCursor:true});
+    const dTx=this.add.text(W/2+50,H/2-10,'❌ DECLINE',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(53);
+    this._penaltyEls=[bg,hd,nm,aBg,aTx,dBg,dTx];
+    const destroy=()=>{this._penaltyEls.forEach(e=>e?.destroy());this._penaltyEls=[];};
+    const accept=()=>{
+      destroy();
+      // Accept: apply yards in favor of beneficiary
+      if(beneficiary==='team'){state.yardLine=Math.min(99,state.yardLine+yards);state.down=1;state.toGo=10;}
+      else{state.yardLine=Math.max(1,state.yardLine-yards);if(state.down<4)state.down=Math.max(1,state.down-1);}
+      this._tdFlash(`✅ PENALTY ACCEPTED — ${yards} yds`,'#22c55e');
+      this.time.delayedCall(600,()=>this._afterPlay());
+    };
+    const decline=()=>{ destroy(); this._tdFlash('❌ PENALTY DECLINED','#ef4444'); this.time.delayedCall(400,()=>this._afterPlay()); };
+    aBg.once('pointerdown',accept); dBg.once('pointerdown',decline);
+    this.time.delayedCall(3000,()=>{ if(this._penaltyEls.length>0)decline(); });
   }
 
 }
