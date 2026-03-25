@@ -65,10 +65,14 @@ export class FieldScene extends Phaser.Scene {
     this._qbReadsActive = false; this._qbReadChoice = 'primary'; this._readOverlayElems = [];
     this._activeAudible = null; this._audibleMenuShown = false; this._audibleMenuElems = [];
     this._defFormation = '4-3'; this._defFormElems = [];
+    // P59-P63 flags
+    this._isOT = false; this._wind = null; this._stackItEls = []; this._stackItBonus = false;
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
     this._buildMomentumHUD();
+    // P62: roll wind once per game
+    const _wdirs=['←','→','↑','↓'];this._wind={dir:_wdirs[Phaser.Math.Between(0,3)],mph:Phaser.Math.Between(3,18)};
     this.time.delayedCall(400, () => this._startKickoffReturn());
   }
 
@@ -393,6 +397,8 @@ export class FieldScene extends Phaser.Scene {
   _doPunt() {
     this.phase = 'result';
     Sound.whistle();
+    // P62: show wind on punt
+    if(this._wind){const wt=this.add.text(this.scale.width/2,FIELD_Y-12,`WIND ${this._wind.dir} ${this._wind.mph}mph`,{fontSize:'9px',fontFamily:'monospace',color:this._wind.mph>12?'#ff6b35':'#ffd700',stroke:'#000',strokeThickness:1}).setOrigin(0.5).setDepth(25);this.time.delayedCall(2500,()=>wt?.destroy());}
     this._showKickoffFlash('PUNT','Control a defender — tackle the returner!',()=>this._launchPuntReturn());
   }
 
@@ -528,6 +534,9 @@ export class FieldScene extends Phaser.Scene {
   _attemptFG() {
     this.phase = 'result';
     const dist = (100 - state.yardLine) + 17;
+    // P62: wind modifier
+    const _wm=this._wind;const windAccMod=_wm?(_wm.dir==='↓'?_wm.mph*0.3:_wm.dir==='↑'?-_wm.mph*0.5:-_wm.mph*0.8):0;
+    if(_wm){const wt=this.add.text(this.scale.width/2,FIELD_Y-12,`WIND ${_wm.dir} ${_wm.mph}mph`,{fontSize:'9px',fontFamily:'monospace',color:_wm.mph>12?'#ff6b35':'#ffd700',stroke:'#000',strokeThickness:1}).setOrigin(0.5).setDepth(25);this.time.delayedCall(2200,()=>wt?.destroy());}
     // P20: FG block — DL OVR scales block chance (base 8%, max ~18%)
     const dlOvr = state.opponent?.players?.filter(p=>p.pos==='DL').reduce((s,p,_,a)=>s+p.ovr/a.length,0)||70;
     const blockCh = Math.min(0.18, 0.04 + (dlOvr - 60) * 0.0015);
@@ -554,7 +563,7 @@ export class FieldScene extends Phaser.Scene {
       }
       return;
     }
-    const made = Math.random() < Math.max(0.18, Math.min(0.96, 1.08 - dist * 0.013));
+    const made = Math.random() < Math.max(0.08, Math.min(0.96, 1.08 - dist*0.013 + windAccMod/100));
     if (made) {
       state.score.team += 3;
       state.yardLine = 20; // flip in _endPlay will give opponent their 80 (80 yds to score)
@@ -1243,7 +1252,9 @@ export class FieldScene extends Phaser.Scene {
   _afterPlay() {
     if (!state._halfShown && state.quarter>=3 && !this._pendingPAT) { state._halfShown=true; this.time.delayedCall(1600,()=>this._showHalftime()); return; }
     if (state.quarter>4 || state.plays>=40) {
-      this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
+      // P60: overtime on tie
+      if (!this._isOT && state.score.team===state.score.opp) { this.time.delayedCall(1600,()=>this._showOTCoinFlip()); }
+      else { this.time.delayedCall(1600, ()=>this.scene.start('GameOver')); }
     } else if (state.possession==='opp') {
       this.time.delayedCall(1800, ()=>{
         if (this._pendingKickoffCover) { this._pendingKickoffCover=false; this._startKickoffCover(); }
@@ -1323,7 +1334,7 @@ export class FieldScene extends Phaser.Scene {
       els.push(b,lbl,s);
     };
     mkBtn(W/2-90,H/2+14,'KICK PAT','+1 pt  •  97%',0x22c55e,()=>this._resolvePAT('kick'));
-    mkBtn(W/2+90,H/2+14,'GO FOR 2','+2 pts  •  MINI-GAME',0x3b82f6,()=>this._startTwoPointPlay());
+    mkBtn(W/2+90,H/2+14,'GO FOR 2','+2 pts  •  RUN / PASS',0x3b82f6,()=>this._showTwoPointChoice());
   }
 
   _resolvePAT(choice) {
@@ -1471,9 +1482,12 @@ export class FieldScene extends Phaser.Scene {
     if (this._aiHurryUp) { this._aiRunSpeed *= 1.08; }
     if (Math.random() < passCh) { this._startAIPass(); return; }
     this.phase = 'ai_run';
+    this._stackItBonus = false;
     const hud = this.scene.get('Hud');
     hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange', 'opp');
     Sound.whistle();
+    // P63: show defensive run stop button
+    this.time.delayedCall(300,()=>this._showDefRunStop());
   }
 
   _startAIPass() {
@@ -1748,6 +1762,16 @@ export class FieldScene extends Phaser.Scene {
     this._aiDriveYards = (this._aiDriveYards||0) + yardsGiven;
     if (yardsGiven >= this.aiToGo) { this.aiDown=1; this.aiToGo=10; Sound.firstDown(); }
     else { this.aiDown++; this.aiToGo=Math.max(1,this.aiToGo-yardsGiven); }
+    // P59: AI punts from outside FG range on 4th down
+    if (this.aiDown===4 && state.yardLine>42 && state.possession==='opp') {
+      state.plays++;if(state.plays%8===0)state.quarter=Math.min(4,state.quarter+1);
+      state.drives.push({poss:'opp',plays:this._aiDrivePlays,yards:this._aiDriveYards,start:this._aiDriveStart||25,result:'PUNT'});
+      this._aiDrivePlays=0;this._aiDriveYards=0;
+      const rp={text:'AI punts — choose your return!',yards:yardsGiven,td:false,turnover:false};
+      this.events.emit('playResult',rp);const hudp=this.scene.get('Hud');hudp?.events?.emit('playResult',rp);
+      this.time.delayedCall(1200,()=>this._showAIPuntDecision());
+      return;
+    }
     // P50: AI 4th down — if in FG range show block option, else turnover on downs
     if (this.aiDown===4 && state.yardLine<=42 && state.possession==='opp') {
       state.plays++;
@@ -2362,7 +2386,7 @@ export class FieldScene extends Phaser.Scene {
       this._aiJukeCD-=delta;
       // AI runner: smooth angle changes for variety
       if (Math.random()<0.012) this._aiAngle=(Math.random()-0.5)*0.5;
-      const aispd = this._aiRunSpeed*dt;
+      const aispd = (this._stackItBonus?this._aiRunSpeed*0.48:this._aiRunSpeed)*dt; // P63: stack bonus slows runner
       this.aiRunner.x -= aispd*Math.cos(this._aiAngle);
       this.aiRunner.y += aispd*Math.sin(this._aiAngle);
       this.aiRunner.y = clamp(this.aiRunner.y,FIELD_Y+10,FIELD_Y+FIELD_H-10);
@@ -3125,5 +3149,69 @@ export class FieldScene extends Phaser.Scene {
       mkBtn(W/2+72,'❌ STAY IN',0x64748b,proceed);
     }
     this.time.delayedCall(4000,()=>{if(els[0]?.active)proceed();});
+  }
+
+  // ─── P59: AI PUNT RETURN DECISION ────────────────────────────────────────
+  _showAIPuntDecision() {
+    const W=this.scale.width,H=this.scale.height;
+    const catchYd=Phaser.Math.Between(55,70); // yards from user's end zone = user's 30-45 yard line
+    const windAdj=this._wind&&(this._wind.dir==='←'||this._wind.dir==='→')?-Phaser.Math.Between(2,7):(this._wind?.dir==='↓'?Phaser.Math.Between(2,5):0);
+    const els=[];const cleanup=()=>els.forEach(e=>e?.destroy?.());
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.78).setDepth(60));
+    els.push(this.add.text(W/2,H/2-60,'AI PUNT',{fontSize:'22px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
+    els.push(this.add.text(W/2,H/2-36,'You receive at your own '+(100-catchYd)+'-yard line',{fontSize:'9px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(61));
+    const mkBtn=(cx,label,sub,hx,cb)=>{const b=this.add.rectangle(cx,H/2+14,160,60,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});const l=this.add.text(cx,H/2+4,label,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);const s=this.add.text(cx,H/2+20,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));b.on('pointerdown',()=>{cleanup();cb();});els.push(b,l,s);};
+    const setupPlay=()=>{state.possession='team';state.down=1;state.toGo=10;this._resetFormation();this._drawLines();const h=this.scene.get('Hud');h?.events?.emit('resetHud');h?.events?.emit('possessionChange','team');this.scene.launch('PlayCall');this.scene.bringToTop('PlayCall');};
+    const doFairCatch=()=>{state.yardLine=catchYd;const r={text:'Fair catch — your ball!',yards:0,td:false,turnover:true,type:'punt'};this.events.emit('playResult',r);const hud=this.scene.get('Hud');hud?.events?.emit('playResult',r);hud?.events?.emit('possessionChange','team');this.time.delayedCall(1200,()=>setupPlay());};
+    const doReturn=()=>{const lEls=[];const lClean=()=>lEls.forEach(e=>e?.destroy?.());lEls.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.78).setDepth(60));lEls.push(this.add.text(W/2,H/2-50,'CHOOSE RETURN LANE',{fontSize:'16px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(61));const mkL=(cx,lane,avgYd,fumbCh)=>{const b=this.add.rectangle(cx,H/2+10,150,54,0x0d1424).setDepth(61).setStrokeStyle(1,0x22c55e,0.6).setInteractive({useHandCursor:true});const l=this.add.text(cx,H/2,lane,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e'}).setOrigin(0.5).setDepth(62);const s=this.add.text(cx,H/2+16,avgYd+'yd avg • '+Math.round(fumbCh*100)+'% fumb',{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);b.on('pointerover',()=>b.setFillStyle(0x22c55e,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));b.on('pointerdown',()=>{lClean();const gained=Math.max(0,Phaser.Math.Between(avgYd-7,avgYd+8)+windAdj);const fumble=Math.random()<fumbCh;if(fumble){this._tdFlash('FUMBLE! ☠️','#ef4444');state.possession='opp';state.yardLine=Math.max(1,100-catchYd+gained);state.down=1;state.toGo=10;const rf={text:'FUMBLE! AI recovers.',yards:0,td:false,turnover:true,type:'fum'};this.events.emit('playResult',rf);const hf=this.scene.get('Hud');hf?.events?.emit('playResult',rf);hf?.events?.emit('possessionChange','opp');this.time.delayedCall(1600,()=>this._startAIDrive());}else{this._tdFlash(`RETURN +${gained}yds!`,'#22c55e');state.yardLine=Math.max(5,catchYd-gained);const rs={text:`Return +${gained}yds`,yards:gained,td:false,turnover:true,type:'punt'};this.events.emit('playResult',rs);const hs=this.scene.get('Hud');hs?.events?.emit('playResult',rs);hs?.events?.emit('possessionChange','team');this.time.delayedCall(1200,()=>setupPlay());}});lEls.push(b,l,s);};mkL(W/2-155,'LEFT',10,0.12);mkL(W/2,'MIDDLE',15,0.06);mkL(W/2+155,'RIGHT',10,0.12);const cdL=this.add.text(W/2,H/2+56,'Auto: 1.5s',{fontSize:'9px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);lEls.push(cdL);let remL=1500;const tickL=()=>{remL-=200;if(remL<=0){lClean();doFairCatch();return;}cdL.setText('Auto: '+(remL/1000).toFixed(1)+'s');this.time.delayedCall(200,tickL);};this.time.delayedCall(200,tickL);};
+    mkBtn(W/2-90,'FAIR CATCH','Safe — no return yards',0x22c55e,doFairCatch);
+    mkBtn(W/2+90,'RETURN','Risk it for extra yards',0xf97316,doReturn);
+    const cdEl=this.add.text(W/2,H/2+68,'Auto: 2.5s',{fontSize:'9px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);
+    els.push(cdEl);let rem=2500;const tick=()=>{rem-=200;if(rem<=0){cleanup();doFairCatch();return;}cdEl.setText('Auto: '+(rem/1000).toFixed(1)+'s');this.time.delayedCall(200,tick);};this.time.delayedCall(200,tick);
+  }
+
+  // ─── P60: OVERTIME MECHANIC ───────────────────────────────────────────────
+  _showOTCoinFlip() {
+    const W=this.scale.width,H=this.scale.height;
+    const flash=this.add.text(W/2,H/2,'OVERTIME!',{fontSize:'38px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(70);
+    this.tweens.add({targets:flash,scaleX:1.25,scaleY:1.25,duration:400,yoyo:true,repeat:2,onComplete:()=>{
+      flash.destroy();this._isOT=true;state.quarter=5;state.plays=0;
+      const els=[];const cleanup=()=>els.forEach(e=>e?.destroy?.());
+      els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(68));
+      els.push(this.add.text(W/2,H/2-62,'COIN FLIP — SUDDEN DEATH',{fontSize:'14px',fontFamily:'monospace',fontStyle:'bold',color:'#ffd700',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(69));
+      els.push(this.add.text(W/2,H/2-40,'First score wins!',{fontSize:'9px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(69));
+      const mkBtn=(cx,label,hx,guessWin)=>{const b=this.add.rectangle(cx,H/2+14,150,56,0x0d1424).setDepth(69).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});const l=this.add.text(cx,H/2+14,label,{fontSize:'14px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(70);b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));b.on('pointerdown',()=>{cleanup();const userWins=Math.random()<0.5;if(userWins){this._tdFlash(guessWin+' — YOU WIN TOSS! ⚡','#22c55e');state.possession='team';state.yardLine=75;state.down=1;state.toGo=10;this.time.delayedCall(1800,()=>{this._resetFormation();this._drawLines();const h=this.scene.get('Hud');h?.events?.emit('resetHud');h?.events?.emit('possessionChange','team');this.scene.launch('PlayCall');this.scene.bringToTop('PlayCall');});}else{this._tdFlash('AI WINS TOSS','#ef4444');state.possession='opp';state.yardLine=25;state.down=1;state.toGo=10;this.time.delayedCall(1800,()=>this._startAIDrive());}});els.push(b,l);};
+      mkBtn(W/2-80,'HEADS',0xffd700,'HEADS');mkBtn(W/2+80,'TAILS',0x94a3b8,'TAILS');
+    }});
+  }
+
+  // ─── P61: TWO-POINT PLAY CHOICE ──────────────────────────────────────────
+  _showTwoPointChoice() {
+    const W=this.scale.width,H=this.scale.height;
+    const els=[];const cleanup=()=>els.forEach(e=>e?.destroy?.());
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.8).setDepth(60));
+    els.push(this.add.text(W/2,H/2-60,'TWO-POINT ATTEMPT',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#3b82f6',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
+    els.push(this.add.text(W/2,H/2-36,'Choose your play:',{fontSize:'9px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(61));
+    const qbData=state.team?.players?.find(p=>p.pos==='QB')||{ovr:78};const rbData=state.team?.players?.find(p=>p.pos==='RB')||{ovr:75};
+    const passRate=Math.round(clamp(40+(qbData.ovr-70)*0.8,30,72));const runRate=Math.round(clamp(35+(rbData.ovr-70)*0.7,25,65));
+    const mkBtn=(cx,label,sub,hx,cb)=>{const b=this.add.rectangle(cx,H/2+14,160,60,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});const l=this.add.text(cx,H/2+4,label,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);const s=this.add.text(cx,H/2+20,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));b.on('pointerdown',()=>{cleanup();cb();});els.push(b,l,s);};
+    mkBtn(W/2-90,'RUN IT','QB sneak mini-game • '+runRate+'% base',0xf97316,()=>this._startTwoPointPlay());
+    mkBtn(W/2+90,'PASS IT',passRate+'% success • Stat-based',0x3b82f6,()=>{const success=Math.random()*100<passRate;if(success){state.score.team+=2;this._tdFlash('TWO-POINT PASS! +2 🎯','#22c55e');}else{this._tdFlash('2PT PASS INCOMPLETE','#ef4444');}state.possession='opp';state.yardLine=25;state.down=1;state.toGo=10;this._pendingKickoffCover=true;const r={text:success?'TWO-POINT CONVERSION! +2':'2PT attempt fails',td:false,yards:0,turnover:false};this.events.emit('playResult',r);const hud=this.scene.get('Hud');hud?.events?.emit('playResult',r);hud?.events?.emit('possessionChange','team');this.time.delayedCall(1800,()=>this._afterPlay());});
+    const cdEl=this.add.text(W/2,H/2+68,'Auto: 3s',{fontSize:'9px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);
+    els.push(cdEl);let rem=3000;const tick=()=>{rem-=200;if(rem<=0){cleanup();this._startTwoPointPlay();return;}cdEl.setText('Auto: '+(rem/1000).toFixed(1)+'s');this.time.delayedCall(200,tick);};this.time.delayedCall(200,tick);
+  }
+
+  // ─── P63: DEFENSIVE RUN STOP ─────────────────────────────────────────────
+  _showDefRunStop() {
+    if(this.phase!=='ai_run')return;
+    const W=this.scale.width,H=this.scale.height;
+    const els=[];const cleanup=()=>{els.forEach(e=>e?.destroy?.());this._stackItEls=[];};
+    const bg=this.add.rectangle(W/2,H-72,200,46,0xdc2626).setDepth(30).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W/2,H-72,'STACK IT! 💪',{fontSize:'13px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',stroke:'#000',strokeThickness:1}).setOrigin(0.5).setDepth(31);
+    const cd=this.add.text(W/2,H-50,'1.2s',{fontSize:'8px',fontFamily:'monospace',color:'#fca5a5'}).setOrigin(0.5).setDepth(31);
+    els.push(bg,tx,cd);this._stackItEls=els;
+    bg.on('pointerover',()=>bg.setFillStyle(0xb91c1c));bg.on('pointerout',()=>bg.setFillStyle(0xdc2626));
+    bg.on('pointerdown',()=>{if(this.phase!=='ai_run')return;cleanup();this._stackItBonus=true;const fl=this.add.text(W/2,H/2-20,'STACKED! 💪',{fontSize:'20px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(35);this.tweens.add({targets:fl,alpha:0,y:fl.y-30,duration:900,onComplete:()=>fl?.destroy?.()});});
+    let rem=1200;const tick=()=>{rem-=200;if(rem<=0||this.phase!=='ai_run'){cleanup();return;}cd.setText((rem/1000).toFixed(1)+'s');this.time.delayedCall(200,tick);};this.time.delayedCall(200,tick);
   }
 }
