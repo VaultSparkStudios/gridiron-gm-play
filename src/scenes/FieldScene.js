@@ -71,10 +71,14 @@ export class FieldScene extends Phaser.Scene {
     this._hurryUpEls = []; this._hurryUpActive = false; this._routeTreeEls = []; this._routeTreeChoice = null;
     this._rushLaneEls = []; this._rushLaneBonus = null;
     this._checkdownActive = false; this._fadeBtnEls = [];
+    // P69-P73 flags
+    this._piChecked = false; this._hurryUpDef = 0; this._motionActive = false; this._motionUsed = false; this._motionBtn = null; this._motionEls = [];
+    this._thirdDownAtt = 0; this._thirdDownConv = 0; this._thirdHUD = null; this._thirdHUDTxt = null;
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
     this._buildMomentumHUD();
+    this._buildThirdDownHUD();
     // P62: roll wind once per game
     const _wdirs=['←','→','↑','↓'];this._wind={dir:_wdirs[Phaser.Math.Between(0,3)],mph:Phaser.Math.Between(3,18)};
     this.time.delayedCall(400, () => this._startKickoffReturn());
@@ -364,7 +368,11 @@ export class FieldScene extends Phaser.Scene {
     // P45: Audible override
     if(this._audibleActive&&state.possession==='team'){const forced=this._audibleActive;this._audibleActive=null;this._audibleUsed=true;if(forced==='run')callId='run_middle';else if(forced==='pass')callId='pass_short';state.currentCall=callId;this._tdFlash('AUDIBLE CALLED','#f59e0b');}
     // P48: generate holding roll at snap for pass plays
-    if(callId.startsWith('pass_'))this._holdingRoll=Math.random()<0.08;
+    if(callId.startsWith('pass_')||callId==='sideline_route')this._holdingRoll=Math.random()<0.08;
+    // P72: track 3rd down attempts
+    if(state.down===3){this._thirdDownAtt++;this._updateThirdHUD();}
+    // P71: show MOTION button for pass plays before snap
+    if((callId.startsWith('pass_')||callId==='sideline_route')&&state.possession==='team'&&!this._motionActive){this._showMotionBtn(callId);return;}
     // P56: Goal line formation flash
     if(this._isGoalLine()&&state.possession==='team')this._applyGoalLineFormation();
     // P17: False start ~4% (offensive penalty, -5 yards, no play); P43: +5% AI false start in comeback mode
@@ -386,6 +394,7 @@ export class FieldScene extends Phaser.Scene {
         this._startRun(callId);
       }
     }
+    else if (callId === 'sideline_route')                                 this._startSidelineRoute();
     else if (callId === 'screen_pass')                                    this._startScreenPass();
     else if (callId === 'pass_action')                                    this._startPlayAction();
     else if (callId.startsWith('pass_')) {
@@ -772,6 +781,7 @@ export class FieldScene extends Phaser.Scene {
   // ─── PASS GAME ────────────────────────────────────────────────────────────
 
   _startPass(callId) {
+    this._piChecked = false; // P69: reset PI flag each play
     this.phase = 'pass_wait';
     this.passVariant = callId.replace('pass_', '');
     const isAction = this.passVariant === 'action';
@@ -1013,8 +1023,10 @@ export class FieldScene extends Phaser.Scene {
     receivers.forEach(({ dot, p }, i) => {
       const cbOvr = dbRatings[i % dbRatings.length] || 75;
       const actBonus = isPlayAction ? 16 : 0;
+      // P71: motion pre-snap reduces coverage 8% on WR1 (index 0)
+      const motionCovBonus = (this._motionActive && i===0) ? 8 : 0;
       const rzCov = state.yardLine >= 80 ? 0.18 : 0;
-      const isOpen = (p.spd||80)+actBonus > (cbOvr+(isZone?-5:0))*0.94 && Math.random() < 0.54+((p.spd||80)+actBonus-cbOvr)/200 - rzCov;
+      const isOpen = (p.spd||80)+actBonus+motionCovBonus > (cbOvr+(isZone?-5:0))*0.94 && Math.random() < 0.54+((p.spd||80)+actBonus+motionCovBonus-cbOvr)/200 - rzCov;
       const zone = this.add.circle(dot.x, dot.y, 20, isOpen?0x22c55e:0xef4444, 0.32)
         .setDepth(8).setInteractive({ useHandCursor:true });
       const icon   = this.add.text(dot.x, dot.y-28, isOpen?'🟢':'🔴', {fontSize:'14px'}).setOrigin(0.5).setDepth(9);
@@ -1136,6 +1148,8 @@ export class FieldScene extends Phaser.Scene {
         // P64: Hurry-up -5% comp penalty
         const _hurryPenalty = this._hurryUpActive ? -0.05 : 0;
         this._hurryUpActive = false;
+        // P71: motion pre-snap +10% comp on one route
+        if(this._motionUsed){compCh=Math.min(0.92,compCh+0.10);this._motionUsed=false;}
         // P54: QB reads modifier
         const qbRead = this._qbReadChoice || 'primary';
         if (qbRead === 'checkdown') { compCh = Math.min(0.92, compCh + 0.15); }
@@ -1149,11 +1163,14 @@ export class FieldScene extends Phaser.Scene {
           this._endPlay({ yards:0, text:'INTERCEPTED! Turnover.', type:'int', turnover:true, td:false }); return;
         }
         if (Math.random() > compCh*qteBonus) {
-          // P17: Pass interference ~4% on incompletion
-          if (Math.random() < 0.04) {
-            Sound.whistle(); this._tdFlash('PASS INTERFERENCE!', '#f59e0b');
+          // P69: Pass interference — 12% on deep incomplete, 4% otherwise; _piChecked prevents double-flag
+          const piCh = (isDeep&&!this._piChecked) ? 0.12 : 0.04;
+          this._piChecked = true;
+          if (Math.random() < piCh) {
+            Sound.whistle(); this._tdFlash('PASS INTERFERENCE! +15 yds', '#f59e0b');
             this._track(qb.id,'att',1);
-            this._endPlay({ yards:state.toGo, text:'FLAG — Pass Interference! Auto 1st down.', type:'penalty', turnover:false, td:false }); return;
+            const piYards = 15;
+            this._endPlay({ yards:piYards, text:`FLAG — Pass Interference! +${piYards} yds, Auto 1st down.`, type:'penalty', turnover:false, td:state.yardLine+piYards>=100 }); return;
           }
           Sound.incomplete(); this._track(qb.id,'att',1);
           this._endPlay({ yards:0, text:'Incomplete.', type:'inc', turnover:false, td:false }); return;
@@ -1212,11 +1229,15 @@ export class FieldScene extends Phaser.Scene {
       this._lastReceiver = null;
     }
 
+    // P72: track 3rd down conversions
+    if(state.down===3&&yards>=(state.toGo||10)){this._thirdDownConv++;this._updateThirdHUD();}
     // P41: update momentum on play result
     if(td) this._updateMomentum(15);
     else if(yards>=(state.toGo||10)) this._updateMomentum(8);
     else if(yards>0) this._updateMomentum(3);
     else this._updateMomentum(-6);
+    // P72: momentum boost if 3rd down rate >=50% with >= 4 attempts
+    if(this._thirdDownAtt>=4&&this._thirdDownConv/this._thirdDownAtt>=0.50){this._updateMomentum(20);this._thirdDownAtt=0;this._thirdDownConv=0;this._updateThirdHUD();}
     // P43: check comeback mode each play
     this._checkComebackMode();
     const text = td ? `🏈 TOUCHDOWN! +${yards} yds!` : `${yards>0?'+':''}${yards} yards`;
@@ -1632,7 +1653,9 @@ export class FieldScene extends Phaser.Scene {
     const cbD=(state.team?.players||[]).find(p=>['CB','S'].includes(p.pos))||{ovr:75};
     const bonus=call==='blitz'?0.12:call==='prevent'?-0.06:0;
     const wxCatchM=state.weather==='snow'?0.80:state.weather==='rain'?0.86:1;
-    const catchCh=Math.min(0.88,Math.max(0.22,(0.58+(wrD.ovr-cbD.ovr)*0.007+bonus)*wxCatchM));
+    // P70: apply hurry-up defense modifier (positive = prevent D, negative = aggressive D)
+    const hurryMod=this._hurryUpDef||0;
+    const catchCh=Math.min(0.88,Math.max(0.22,(0.58+(wrD.ovr-cbD.ovr)*0.007+bonus+hurryMod)*wxCatchM));
     if(Math.random()>catchCh){ Sound.incomplete(); this._resolveAIPlay(0); return; }
     const yards=Math.max(1,Math.round(rec.routeDepth/YARD_W)+Phaser.Math.Between(-1,3));
     state.stats.opp.passYds=(state.stats.opp.passYds||0)+yards;
@@ -1741,7 +1764,10 @@ export class FieldScene extends Phaser.Scene {
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(2000, ()=>this.scene.start('GameOver'));
     } else {
-      this.time.delayedCall(2400, ()=>this._startKickoffReturn());
+      // P70: Hurry-Up Defense — Q4, score within 8
+      const diff=Math.abs((state.score.team||0)-(state.score.opp||0));
+      if(state.quarter>=4&&diff<=8){this.time.delayedCall(600,()=>this._showHurryUpDefense());}
+      else{this.time.delayedCall(2400, ()=>this._startKickoffReturn());}
     }
   }
 
@@ -3368,4 +3394,142 @@ export class FieldScene extends Phaser.Scene {
     this.time.delayedCall(4500,()=>cleanup());
   }
 
+  // ─── P70: Hurry-Up Defense ───────────────────────────────────────────────
+  _showHurryUpDefense() {
+    const W=this.scale.width,H=this.scale.height;
+    const els=[];
+    const cleanup=()=>{els.forEach(e=>e?.destroy?.());};
+    const choices=[
+      {label:'PREVENT D',sub:'Soft coverage — stop big plays',mod:-0.08,col:'#38bdf8',bg:0x0c4a6e},
+      {label:'AGGRESSIVE D',sub:'Press coverage — force incompletions',mod:0.12,col:'#f97316',bg:0x78350f},
+    ];
+    const overlay=this.add.rectangle(W/2,H/2,W,H,0x000000,0.72).setDepth(40);
+    const panel=this.add.rectangle(W/2,H/2,320,150,0x0d1424,1).setDepth(41).setStrokeStyle(1,0xef4444);
+    const title=this.add.text(W/2,H/2-55,'⚡ HURRY-UP OFFENSE',{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#ef4444',letterSpacing:2}).setOrigin(0.5).setDepth(42);
+    const sub=this.add.text(W/2,H/2-38,'Opponent is in hurry-up mode — choose your defense',{fontSize:'8px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(42);
+    let cd=3;
+    const cdTxt=this.add.text(W/2,H/2+52,'Auto-selecting in '+cd+'s',{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(42);
+    els.push(overlay,panel,title,sub,cdTxt);
+    const tick=this.time.addEvent({delay:1000,repeat:2,callback:()=>{cd--;cdTxt.setText('Auto-selecting in '+cd+'s');if(cd<=0){cleanup();tick.remove();this._hurryUpDef=-0.05;this.time.delayedCall(200,()=>this._startKickoffReturn());}}});
+    choices.forEach((c,i)=>{
+      const cx=W/2-80+i*160,cy=H/2+6;
+      const accent=Phaser.Display.Color.HexStringToColor(c.col).color;
+      const btn=this.add.rectangle(cx,cy,140,60,c.bg,0.25).setDepth(41).setStrokeStyle(1,accent,0.7).setInteractive({useHandCursor:true});
+      const lt=this.add.text(cx,cy-10,c.label,{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:c.col}).setOrigin(0.5).setDepth(42);
+      const st=this.add.text(cx,cy+10,c.sub,{fontSize:'7px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(42);
+      btn.on('pointerover',()=>btn.setFillStyle(c.bg,0.5));
+      btn.on('pointerout',()=>btn.setFillStyle(c.bg,0.25));
+      btn.on('pointerdown',()=>{cleanup();tick.remove();this._hurryUpDef=c.mod;this.time.delayedCall(200,()=>this._startKickoffReturn());});
+      els.push(btn,lt,st);
+    });
+  }
+
+  // ─── P71: Motion Pre-Snap ───────────────────────────────────────────────
+  _showMotionBtn(callId) {
+    if(this._motionEls.length>0)return;
+    const W=this.scale.width;
+    const cleanup=()=>{this._motionEls.forEach(e=>e?.destroy?.());this._motionEls=[];this._motionBtn=null;};
+    const bg=this.add.rectangle(W*0.18,FIELD_Y+32,100,36,0x1d4ed8,0.88).setDepth(28).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W*0.18,FIELD_Y+28,'🏃 MOTION',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#bfdbfe',stroke:'#000',strokeThickness:1}).setOrigin(0.5).setDepth(29);
+    const st=this.add.text(W*0.18,FIELD_Y+40,'WR decoy -8% cov',{fontSize:'7px',fontFamily:'monospace',color:'#60a5fa'}).setOrigin(0.5).setDepth(29);
+    const skipTx=this.add.text(W*0.18,FIELD_Y+52,'[tap to snap]',{fontSize:'6px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(29);
+    this._motionEls=[bg,tx,st,skipTx];
+    bg.on('pointerover',()=>bg.setFillStyle(0x1e40af,0.95));
+    bg.on('pointerout',()=>bg.setFillStyle(0x1d4ed8,0.88));
+    bg.on('pointerdown',()=>{
+      cleanup();
+      this._motionActive=true;
+      this._tdFlash('WR IN MOTION','#60a5fa');
+      // Tween WR1 left 30px then snap
+      this.tweens.add({targets:this.wr1,x:this.wr1.x-30,duration:500,ease:'Sine.easeInOut',
+        onUpdate:()=>this._syncLbl(this.wr1),
+        onComplete:()=>{this._motionActive=false;this._motionUsed=true;this._dispatchPassPlay(callId);}
+      });
+    });
+    // skip motion button — tap anywhere else to snap without motion
+    const skipBtn=this.add.rectangle(W/2,FIELD_Y-18,120,22,0x1e293b,0.7).setDepth(28).setInteractive({useHandCursor:true});
+    const skipTxt=this.add.text(W/2,FIELD_Y-18,'Skip → Snap',{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(29);
+    this._motionEls.push(skipBtn,skipTxt);
+    skipBtn.on('pointerdown',()=>{cleanup();this._dispatchPassPlay(callId);});
+    this.time.delayedCall(3000,()=>{if(this._motionEls.length>0){cleanup();this._dispatchPassPlay(callId);}});
+  }
+
+  _dispatchPassPlay(callId) {
+    if(callId==='sideline_route'){this._startSidelineRoute();return;}
+    if(callId==='screen_pass'){this._startScreenPass();return;}
+    if(callId==='pass_action'){this._startPlayAction();return;}
+    if(state.down===4&&state.toGo>=15&&state.yardLine<55&&state.possession==='team'){this._showHailMaryOption(callId);return;}
+    if(state.yardLine>=75&&(callId==='pass_short'||callId==='pass_medium')&&Math.random()<0.25){this._startBootleg(callId);return;}
+    if(state.yardLine<=15&&!this._noHuddleActive){this._showFadeOption(callId);return;}
+    this._startPass(callId);
+  }
+
+  // ─── P72: Third Down Conversion HUD ─────────────────────────────────────
+  _buildThirdDownHUD() {
+    const W=this.scale.width;
+    this._thirdHUD=this.add.rectangle(W-54,FIELD_Y+52,90,28,0x0d1424,0.88).setDepth(8).setStrokeStyle(1,0x334155);
+    this._thirdHUDTxt=this.add.text(W-54,FIELD_Y+52,'3rd: 0/0 (—)',{fontSize:'7px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(9);
+  }
+
+  _updateThirdHUD() {
+    if(!this._thirdHUDTxt)return;
+    const att=this._thirdDownAtt,conv=this._thirdDownConv;
+    const pct=att>0?Math.round(conv/att*100):0;
+    const col=pct>=50?'#22c55e':pct>=33?'#eab308':'#ef4444';
+    this._thirdHUDTxt.setText(`3rd: ${conv}/${att} (${att>0?pct+'%':'—'})`).setColor(col);
+  }
+
+  // ─── P73: Sideline Route ────────────────────────────────────────────────
+  _startSidelineRoute() {
+    this._piChecked=false;
+    this.phase='pass_wait';
+    this.passVariant='sideline';
+    this._animateRoutes('quick');
+    this._setupPocket();
+    this._startPassRush(false);
+    Sound.whistle();
+    this.events.emit('phaseChange','pass');
+    // WR1 tweens right 60px for sideline route
+    this.time.delayedCall(200,()=>{
+      this.tweens.add({targets:this.wr1,x:this.wr1.x+60,duration:400,ease:'Sine.easeOut',
+        onUpdate:()=>this._syncLbl(this.wr1),
+        onComplete:()=>this._resolveSidelineRoute()
+      });
+    });
+    // Auto-resolve after 2.5s
+    this.time.delayedCall(2500,()=>{if(this.phase==='pass_wait')this._resolveSidelineRoute();});
+  }
+
+  _resolveSidelineRoute() {
+    if(this.phase!=='pass_wait')return;
+    this.phase='result';
+    this._clearPassRush();
+    const wrData=state.team?.players?.find(p=>p.pos==='WR')||{ovr:80,spd:88};
+    const cbData=state.opponent?.players?.find(p=>p.pos==='CB')||{ovr:78};
+    const catchCh=0.78+(((wrData.spd||88)-(cbData.ovr||78))*0.003);
+    const motionBonus=this._motionActive?0.08:0;
+    const caught=Math.random()<(catchCh+motionBonus);
+    const yards=caught?Phaser.Math.Between(4,8):0;
+    const td=caught&&state.yardLine+yards>=100;
+    const qb=state.team?.players?.find(p=>p.pos==='QB')||{id:'qb1',ovr:80};
+    const wr=state.team?.players?.find(p=>p.pos==='WR')||{id:'wr1'};
+    if(caught){
+      Sound.firstDown?.();
+      state.stats.team.passYds+=yards;
+      this._track(qb.id,'passYds',yards);this._track(qb.id,'att',1);this._track(qb.id,'comp',1);
+      this._track(wr.id,'recYds',yards);this._track(wr.id,'rec',1);
+      if(td){Sound.td?.();this._tdFlash('SIDELINE TD! 🏈','#22c55e');this._track(wr.id,'recTD',1);this._track(qb.id,'passTD',1);}
+      else{this._tdFlash('SIDELINE CATCH — CLOCK STOPS','#38bdf8');}
+    } else {
+      Sound.incomplete?.();
+    }
+    // P72: 3rd down conversion tracking
+    if(state.down===3&&yards>=(state.toGo||10)){this._thirdDownConv++;this._updateThirdHUD();}
+    this._updateMomentum(caught?6:-2);
+    this._checkComebackMode();
+    const text=td?`🏈 SIDELINE TOUCHDOWN!`:(caught?`Sideline catch — ${yards} yds (clock stops)`:'Sideline route — incomplete');
+    this._endPlay({yards:yards||0,text,type:td?'td':'pass',turnover:false,td,clockStop:caught&&!td});
+  }
+
 }
+
