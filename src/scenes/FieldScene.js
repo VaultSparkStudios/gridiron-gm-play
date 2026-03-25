@@ -1051,8 +1051,14 @@ export class FieldScene extends Phaser.Scene {
         this._resetFormation(); this._drawLines();
         const hud = this.scene.get('Hud');
         hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
-        // P23: offer no-huddle after first down
-        if (state.down === 1 && state.toGo === 10 && this._lastPlayGainedFirstDown) {
+        // P30: two-minute drill — auto no-huddle
+        if (state._drillMode) {
+          [this.cb1,this.cb2].forEach(c=>{c.x+=(Math.random()-0.5)*20;c.y+=(Math.random()-0.5)*20;this._syncLbl(c);});
+          if(this.lb.visible){this.lb.x+=(Math.random()-0.5)*14;this.lb.y+=(Math.random()-0.5)*14;this._syncLbl(this.lb);}
+          const dTxt=this.add.text(this.scale.width/2,FIELD_Y-24,'⚡ 2-MIN DRILL',{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(20);
+          this.time.delayedCall(900,()=>{dTxt?.destroy();this.scene.launch('PlayCall');this.scene.bringToTop('PlayCall');});
+        } else if (state.down === 1 && state.toGo === 10 && this._lastPlayGainedFirstDown) {
+          // P23: offer no-huddle after first down
           this._showNoHuddleOption();
         } else {
           this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
@@ -1226,6 +1232,11 @@ export class FieldScene extends Phaser.Scene {
         fontSize:'10px', fontFamily:'monospace', fontStyle:'bold', color:'#f97316', stroke:'#000', strokeThickness:2
       }).setOrigin(0.5).setDepth(25);
       this.time.delayedCall(1500, () => { hb?.destroy(); this._launchAIDrive(); });
+    } else if (state._drillMode) {
+      this._defCall='prevent'; this._aiHurryUp=false;
+      const W=this.scale.width;
+      const db=this.add.text(W/2,FIELD_Y+20,'⚡ 2-MIN DRILL — PREVENT DEFENSE',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(25);
+      this.time.delayedCall(1400,()=>{db?.destroy();this._launchAIDrive();});
     } else {
       this._aiHurryUp = false;
       this._showDefCall(() => this._launchAIDrive());
@@ -1493,6 +1504,7 @@ export class FieldScene extends Phaser.Scene {
   }
 
   _showHalftime() {
+    state._drillMode=false;
     const W=this.scale.width, H=this.scale.height;
     const t=state.team?.ab||'YOU', o=state.opponent?.ab||'OPP';
     const bg=this.add.rectangle(W/2,H/2,W,H,0x0a0f1a,0.96).setDepth(62);
@@ -1518,7 +1530,7 @@ export class FieldScene extends Phaser.Scene {
     const t=this.add.text(W/2,H/2-60,'⏱ TWO-MINUTE WARNING',{fontSize:'16px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(63);
     Sound.whistle();
     this.time.delayedCall(2200,()=>{
-      this.tweens.add({targets:[bg,t],alpha:0,duration:400,onComplete:()=>{bg.destroy();t.destroy();cb();}});
+      this.tweens.add({targets:[bg,t],alpha:0,duration:400,onComplete:()=>{bg.destroy();t.destroy();state._drillMode=true;cb();}});
     });
   }
 
@@ -1899,16 +1911,17 @@ export class FieldScene extends Phaser.Scene {
     els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(60));
     els.push(this.add.text(W/2,H/2-60,'RED ZONE — PLAY CALL',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#ef4444',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
     els.push(this.add.text(W/2,H/2-36,'Choose your play:',{fontSize:'10px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(61));
-    const mkBtn=(cx,cy,label,sub,hx,cb)=>{
-      const b=this.add.rectangle(cx,cy,160,60,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
-      const lbl=this.add.text(cx,cy-10,label,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);
-      const s=this.add.text(cx,cy+10,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);
+    const mkBtn=(cx,cy,label,sub,hx,cb,w=128)=>{
+      const b=this.add.rectangle(cx,cy,w,60,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
+      const lbl=this.add.text(cx,cy-10,label,{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);
+      const s=this.add.text(cx,cy+10,sub,{fontSize:'7px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);
       b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
       b.on('pointerdown',()=>{cleanup();cb();});
       els.push(b,lbl,s);
     };
-    mkBtn(W/2-90,H/2+14,'NORMAL PASS','Standard route',0x22c55e,()=>this._startPass(callId));
-    mkBtn(W/2+90,H/2+14,'🎯 FADE ROUTE','Corner route — timing catch',0xf59e0b,()=>this._startFadeRoute());
+    mkBtn(W/2-150,H/2+14,'NORMAL PASS','Standard route',0x22c55e,()=>this._startPass(callId));
+    mkBtn(W/2,H/2+14,'⚡ SLANT','Hot route — quick inside',0x3b82f6,()=>this._startSlantRoute(callId));
+    mkBtn(W/2+150,H/2+14,'🎯 FADE ROUTE','Corner — timing catch',0xf59e0b,()=>this._startFadeRoute());
     // Auto-dismiss to normal pass after 3s
     const cdEl=this.add.text(W/2,H/2+60,'Auto: 3s',{fontSize:'9px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);
     els.push(cdEl);
@@ -1992,6 +2005,49 @@ export class FieldScene extends Phaser.Scene {
     const td=yards>0&&state.yardLine-yards<=0;
     if(td){Sound.td?.();this._tdFlash('TOUCHDOWN! 🎭','#a78bfa');}
     this._endPlay({yards,text,type:'run',turnover:false,td});
+  }
+
+  // ─── P31: RED ZONE SLANT ──────────────────────────────────────────────────
+
+  _startSlantRoute(callId) {
+    const cy=FIELD_Y+FIELD_H/2, W=this.scale.width;
+    [...this.offPlayers,...this.defPlayers].forEach(d=>this._show(d,false));
+    this._show(this.qb,true); this._show(this.wr1,true); this._show(this.cb1,true);
+    const qbX=yardToX(Math.max(5,state.yardLine-5));
+    this._place(this.qb,qbX,cy); this._place(this.wr1,qbX-10,cy-55); this._place(this.cb1,qbX-12,cy-55);
+    this.qb._lbl?.setText('QB'); this.wr1._lbl?.setText('WR'); this.cb1._lbl?.setText('CB');
+    this.ball.x=this.qb.x; this.ball.y=this.qb.y;
+    this.phase='slant_route';
+    const banner=this.add.text(W/2,FIELD_Y-20,'⚡ SLANT — QUICK INSIDE',{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#3b82f6',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(20);
+    // WR cuts inside (toward cy), CB reacts
+    this.tweens.add({targets:this.wr1,x:qbX+15,y:cy-10,duration:480,ease:'Quad.easeIn'});
+    this.tweens.add({targets:this.cb1,x:qbX+12,y:cy-12,duration:520,ease:'Quad.easeIn',delay:60});
+    // Ball snaps to WR at 500ms
+    this.time.delayedCall(500,()=>{
+      this.tweens.add({targets:this.ball,x:this.wr1.x,y:this.wr1.y,duration:200,ease:'Linear'});
+    });
+    this.time.delayedCall(820,()=>{banner?.destroy();this._resolveSlant();});
+  }
+
+  _resolveSlant() {
+    const wrD=state.team?.players?.find(p=>p.pos==='WR')||{ovr:80};
+    const cbD=state.opponent?.players?.find(p=>p.pos==='CB')||{ovr:75};
+    const qbD=state.team?.players?.find(p=>p.pos==='QB')||{ovr:80};
+    const cbPressChance=clamp((cbD.ovr-68)*0.007,0,0.14);
+    const compRate=clamp(0.70+(qbD.ovr-70)*0.003+(wrD.ovr-70)*0.002,0.55,0.85);
+    const roll=Math.random();
+    if(roll<cbPressChance){
+      if(Math.random()<0.38){Sound.incomplete?.();this._endPlay({yards:0,text:'SLANT PICKED OFF — CB jumped the route!',type:'int',turnover:true,td:false});}
+      else{Sound.incomplete?.();this._endPlay({yards:0,text:'Slant defended — CB in press coverage',type:'inc',turnover:false,td:false});}
+      return;
+    }
+    if(roll<compRate){
+      const td=state.yardLine<=9&&Math.random()<0.38;
+      if(td){Sound.td?.();this._tdFlash('TOUCHDOWN! ⚡','#3b82f6');this._endPlay({yards:state.yardLine,text:'TD — Slant over the middle!',type:'td',turnover:false,td:true});}
+      else{const yds=Phaser.Math.Between(4,Math.min(11,state.yardLine-1));this._endPlay({yards:yds,text:`Slant — ${yds} yard gain`,type:'pass',turnover:false,td:false});}
+      return;
+    }
+    Sound.incomplete?.();this._endPlay({yards:0,text:'Slant — incomplete',type:'inc',turnover:false,td:false});
   }
 
   _startFadeRoute() {
