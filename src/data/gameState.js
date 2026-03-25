@@ -31,6 +31,12 @@ export const state = {
   // Drive tracking
   drives: [],
   currentDrive: null,
+
+  // In-game injuries (written to gm_game_result for GM import)
+  injuries: [],
+
+  // Weather: 'clear' | 'rain' | 'snow'
+  weather: 'clear',
 };
 
 export function resetState() {
@@ -50,6 +56,8 @@ export function resetState() {
   state.playerStats = {};
   state.drives = [];
   state.currentDrive = null;
+  state.injuries = [];
+  state.weather = 'clear';
   state._halfShown = false;
   state._twoMin1 = false;
   state._twoMin2 = false;
@@ -63,6 +71,7 @@ export function exportStats() {
     teamName: state.team?.name,
     oppName: state.opponent?.name,
     // Per-player deltas — GM reads these to update player season stats
+    injuries: state.injuries || [],
     playerDeltas: state.team?.players?.map(p => {
       const ps = state.playerStats[p.id] || {};
       return {

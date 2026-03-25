@@ -25,6 +25,7 @@ export class FieldScene extends Phaser.Scene {
     this.jukeCD = 0;
     this._pendingPAT = false;
     this._pendingKickoffCover = false;
+    this._defCall = 'cover2';
     this._aiAngle = 0; this._aiJukeCD = 0;
     this.aiDown = 1; this.aiToGo = 10;
     this._lastReceiver = null;
@@ -32,7 +33,40 @@ export class FieldScene extends Phaser.Scene {
     this._pocketBeaten = [false, false, false, false, false];
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
+    this._startWeather();
     this.time.delayedCall(400, () => this._startKickoffReturn());
+  }
+
+  _startWeather() {
+    const wx = state.weather;
+    if (wx === 'clear') return;
+    const W = this.scale.width, H = this.scale.height;
+    // Tint overlay
+    const tc = wx==='rain' ? 0x1e3a5f : 0xdbeafe;
+    this.add.rectangle(W/2, H/2, W, H, tc, 0.12).setDepth(1);
+    // Animated drops/flakes
+    const count = wx==='rain' ? 40 : 24;
+    const drops = [];
+    for (let i=0; i<count; i++) {
+      const gfx = this.add.graphics().setDepth(190);
+      drops.push({ gfx, x:Math.random()*W, y:Math.random()*H,
+        spd: wx==='rain' ? 7+Math.random()*5 : 1+Math.random()*2,
+        drift: (Math.random()-0.5)*0.8 });
+    }
+    this.time.addEvent({ delay:33, loop:true, callback:()=>{
+      drops.forEach(d=>{
+        d.x+=d.drift; d.y+=d.spd;
+        if(d.y>H){ d.y=-8; d.x=Math.random()*W; }
+        d.gfx.clear();
+        if(wx==='rain'){
+          d.gfx.lineStyle(1,0x93c5fd,0.45);
+          d.gfx.lineBetween(d.x,d.y,d.x-1,d.y-5);
+        } else {
+          d.gfx.fillStyle(0xffffff,0.55);
+          d.gfx.fillCircle(d.x,d.y,1.5);
+        }
+      });
+    }});
   }
 
   // ─── FIELD ────────────────────────────────────────────────────────────────
@@ -58,6 +92,11 @@ export class FieldScene extends Phaser.Scene {
     this.add.text(4, FIELD_Y + FIELD_H + 8,
       'Offense: WASD / Juke: SPACE / Pass: click receiver  •  Defense: WASD to tackle',
       { fontSize:'9px', fontFamily:'monospace', color:'#334155' });
+    // P16: Red zone overlay (toggled in _drawLines)
+    this._rzTint = this.add.rectangle(FIELD_RIGHT - 30, FIELD_Y + FIELD_H/2, 62, FIELD_H, 0xef4444, 0.07).setDepth(1).setVisible(false);
+    this._rzIndicator = this.add.text(yardToX(90), FIELD_Y + 22, '◈ RED ZONE', {
+      fontSize:'10px', fontFamily:'monospace', fontStyle:'bold', color:'#ef4444', stroke:'#000', strokeThickness:2
+    }).setOrigin(0.5).setDepth(12).setVisible(false);
   }
 
   _createBall() { this.ball = this.add.circle(0, 0, 6, 0xd97706).setDepth(10); }
@@ -81,6 +120,16 @@ export class FieldScene extends Phaser.Scene {
     this.saf = this._dot(oc, 'FS',  11);
     this.defPlayers = [this.dl, this.dl2, this.lb, this.lb2, this.cb1, this.cb2, this.saf];
     this.recTargets = [];
+    // Kickoff return blockers (P18)
+    this.blk1 = this._dot(tc, 'BLK', 10); this.blk2 = this._dot(tc, 'BLK', 10); this.blk3 = this._dot(tc, 'BLK', 10);
+    this.kickBlocks = [this.blk1, this.blk2, this.blk3];
+    this.kickBlocks.forEach(b => this._show(b, false));
+    this._engagedCvg = new Set();
+    // P19: Punt return blockers (opponent team color)
+    const oc2 = Phaser.Display.Color.HexStringToColor(state.opponent?.clr || '#ef4444').color;
+    this.puntBlk1 = this._dot(oc2,'BLK',10); this.puntBlk2 = this._dot(oc2,'BLK',10);
+    this.puntBlocks = [this.puntBlk1, this.puntBlk2];
+    this.puntBlocks.forEach(b=>this._show(b,false));
   }
 
   _dot(color, label, radius) {
@@ -147,6 +196,7 @@ export class FieldScene extends Phaser.Scene {
     this._place(this.rt,  lx, cy + 28);
 
     this._applySchemeFormation(lx, cy, state.opponent?.dcScheme || '4-3');
+    if (state.yardLine >= 80 && state.possession === 'team') this._applyRedZoneFormation(cy);
     this.ball.x = this.qb.x; this.ball.y = this.qb.y;
     this.phase = 'presnap';
     this.jukeCD = 0;
@@ -222,6 +272,18 @@ export class FieldScene extends Phaser.Scene {
     }
   }
 
+  // P16: compress defensive formation inside the 20
+  _applyRedZoneFormation(cy) {
+    [this.cb1, this.cb2].forEach(cb => {
+      if (!cb.visible) return;
+      const dy = cb.y - cy;
+      this._place(cb, cb.x - 8, cy + dy * 0.62);
+    });
+    if (this.saf.visible) this._place(this.saf, this.saf.x - 22, cy);
+    if (this.lb.visible)  { const dy = this.lb.y - cy;  this._place(this.lb,  this.lb.x  - 6, cy + dy * 0.78); }
+    if (this.lb2.visible) { const dy = this.lb2.y - cy; this._place(this.lb2, this.lb2.x - 6, cy + dy * 0.78); }
+  }
+
   _drawLines() {
     this.losLine.clear(); this.firstDownLine.clear();
     const lx = yardToX(state.yardLine);
@@ -236,6 +298,10 @@ export class FieldScene extends Phaser.Scene {
       this.firstDownLine.lineStyle(2, 0xef4444, 0.7);
       this.firstDownLine.lineBetween(fdx, FIELD_Y, fdx, FIELD_Y + FIELD_H);
     }
+    // P16: red zone overlay
+    const inRZ = state.possession === 'team' && state.yardLine >= 80;
+    if (this._rzTint) this._rzTint.setVisible(inRZ);
+    if (this._rzIndicator) this._rzIndicator.setVisible(inRZ);
   }
 
   _clearArc() { this.arcGfx.clear(); }
@@ -244,6 +310,13 @@ export class FieldScene extends Phaser.Scene {
 
   _onPlayCalled(callId) {
     state.currentCall = callId;
+    // P17: False start ~4% (offensive penalty, -5 yards, no play)
+    if (this.phase === 'presnap' && callId !== 'punt' && callId !== 'fg' && Math.random() < 0.04) {
+      this.phase = 'result'; Sound.whistle();
+      this._tdFlash('FALSE START — 5 yds', '#f59e0b');
+      this._endPlay({ yards:-5, text:'FLAG — False Start. 5-yard penalty.', type:'penalty', turnover:false, td:false });
+      return;
+    }
     if      (callId === 'punt')                              this._doPunt();
     else if (callId === 'fg')                                this._attemptFG();
     else if (callId.startsWith('run_') || callId === 'scramble') this._startRun(callId);
@@ -253,14 +326,168 @@ export class FieldScene extends Phaser.Scene {
   _doPunt() {
     this.phase = 'result';
     Sound.whistle();
-    this._endPlay({ yards:0, text:'PUNT — possession flipped', type:'punt', turnover:true, td:false });
+    this._showKickoffFlash('PUNT','Control a defender — tackle the returner!',()=>this._launchPuntReturn());
+  }
+
+  _launchPuntReturn() {
+    // Punt lands at opponent's ~35-45 yard line (from their endzone = their 35-45)
+    // In our coordinate system: user attacks right (toward yard 100)
+    // After punt, possession flips: opp starts at ~their 35 = our 55-65 yard line
+    const catchYard = Phaser.Math.Between(55, 68);
+    // P22: 5% muff chance
+    if (Math.random() < 0.05) { this._launchMuffedPunt(catchYard); return; }
+    const cy = FIELD_Y + FIELD_H / 2;
+    const tc = Phaser.Display.Color.HexStringToColor(state.team?.clr || '#22c55e').color;
+    const oc = Phaser.Display.Color.HexStringToColor(state.opponent?.clr || '#ef4444').color;
+
+    // Hide all offense/defense
+    [...this.offPlayers, ...this.defPlayers].forEach(d => this._show(d, false));
+
+    // Place returner (opponent RB) at catch yard
+    this._place(this.dl, yardToX(catchYard), cy);
+    this.dl._lbl?.setText('RTR');
+    this._show(this.dl, true);
+    const rData = state.opponent?.players?.find(p => p.pos === 'RB') || { spd: 80 };
+    this._aiRunSpeed = pxs(rData.spd, 72, 0.95);
+
+    // Spawn 2 blockers ahead of returner (toward our endzone = decreasing x)
+    this._show(this.puntBlk1, true); this._show(this.puntBlk2, true);
+    this._place(this.puntBlk1, yardToX(catchYard - 8), cy - 22);
+    this._place(this.puntBlk2, yardToX(catchYard - 8), cy + 22);
+
+    // User controls LB as defender — placed downfield
+    this._place(this.lb, yardToX(catchYard - 20), cy);
+    this.lb._lbl?.setText('YOU');
+    this._show(this.lb, true);
+    const dData = state.team?.players?.find(p => p.pos === 'LB') || { spd: 76 };
+    this._defSpd = pxs(dData.spd, 88, 1.1);
+
+    // Additional AI defenders converge
+    this._place(this.lb2, yardToX(catchYard - 30), cy - 44);
+    this.lb2._lbl?.setText('DEF');
+    this._show(this.lb2, true);
+    this._place(this.cb1, yardToX(catchYard - 25), cy + 44);
+    this.cb1._lbl?.setText('DEF');
+    this._show(this.cb1, true);
+
+    this.userDef = this.lb;
+    this.puntRunner = this.dl;
+    this.puntStartX = yardToX(catchYard);
+    this._puntEngaged = new Set();
+
+    this.ball.x = this.dl.x; this.ball.y = this.dl.y;
+    this.phase = 'punt_return';
+    this.jukeCD = 0;
+    this._aiAngle = 0; this._aiJukeCD = 0;
+
+    // AI converge defenders
+    [this.lb2, this.cb1].forEach(d => {
+      this.time.addEvent({ delay:16, loop:true, callback:()=>{
+        if(this.phase!=='punt_return')return;
+        const dx=this.puntRunner.x-d.x, dy=this.puntRunner.y-d.y, dist=Math.sqrt(dx*dx+dy*dy);
+        if(dist<14){this._puntTackled();return;}
+        if(dist>55){d.x+=(dx/dist)*0.55;d.y+=(dy/dist)*0.55;this._syncLbl(d);}
+      }});
+    });
+
+    Sound.whistle();
+    const hud = this.scene.get('Hud');
+    hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','opp');
+    this.events.emit('phaseChange','punt_return');
+  }
+
+  _puntTackled() {
+    if(this.phase!=='punt_return')return;
+    this.phase='result';
+    // Calculate return yards (returner ran from catchYard toward user endzone = decreasing x)
+    const retYards = Math.max(0, Math.round((this.puntStartX - this.puntRunner.x) / YARD_W));
+    // Hide punt pieces
+    this.puntBlocks?.forEach(b=>this._show(b,false));
+    [this.dl,this.lb,this.lb2,this.cb1].forEach(d=>this._show(d,false));
+    // Net punt: opponent gets ball at their catch position minus return yards
+    const text = retYards > 15 ? `Punt return! ${retYards} yards by returner.` :
+                 retYards > 0  ? `Return for ${retYards} yards.` : 'Fair catch — no return.';
+    Sound.whistle();
+    this._endPlay({ yards: 0, text, type:'punt', turnover:true, td:false, puntReturn:retYards });
+  }
+
+  _launchMuffedPunt(catchYard) {
+    const cy = FIELD_Y + FIELD_H / 2;
+    // Hide everyone, place loose ball
+    [...this.offPlayers, ...this.defPlayers].forEach(d => this._show(d, false));
+    this.puntBlocks?.forEach(b => this._show(b, false));
+    this.ball.x = yardToX(catchYard); this.ball.y = cy;
+
+    // User defender rushes for ball
+    this._place(this.lb, yardToX(catchYard - 22), cy);
+    this.lb._lbl?.setText('YOU');
+    this._show(this.lb, true);
+    const dData = state.team?.players?.find(p => p.pos === 'LB') || { spd: 76 };
+    this._defSpd = pxs(dData.spd, 92, 1.1);
+
+    // AI returner rushes for ball from opposite side
+    this._place(this.dl, yardToX(catchYard + 8), cy + Phaser.Math.Between(-30, 30));
+    this.dl._lbl?.setText('RTR');
+    this._show(this.dl, true);
+
+    this.userDef = this.lb;
+    this.phase = 'muffed_punt';
+    this._muffYard = catchYard;
+    Sound.whistle();
+    this._tdFlash('MUFFED PUNT! 💀', '#f59e0b');
+
+    const hud = this.scene.get('Hud');
+    hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange', 'opp');
+    this.events.emit('phaseChange', 'muffed_punt');
+
+    // 2-second recovery window, then auto-resolve based on proximity
+    this.time.delayedCall(2000, () => {
+      if (this.phase !== 'muffed_punt') return;
+      this.phase = 'result';
+      const userDist = Math.hypot(this.lb.x - this.ball.x, this.lb.y - this.ball.y);
+      const aiDist   = Math.hypot(this.dl.x - this.ball.x, this.dl.y - this.ball.y);
+      const userRecovers = userDist < aiDist;
+      this._show(this.lb, false); this._show(this.dl, false);
+      if (userRecovers) {
+        state.possession = 'team'; state.yardLine = catchYard; state.down = 1; state.toGo = 10;
+        this._tdFlash('RECOVERED! 🎉', '#22c55e');
+        this._endPlay({ yards: 0, text: `MUFFED PUNT recovered by ${state.team?.ab||'YOU'} at yard ${catchYard}!`, type: 'fumble', turnover: false, td: false });
+      } else {
+        this._endPlay({ yards: 0, text: 'Returner recovers the muff.', type: 'punt', turnover: true, td: false });
+      }
+    });
   }
 
   _attemptFG() {
     this.phase = 'result';
     const dist = (100 - state.yardLine) + 17;
-    const made = Math.random() < Math.max(0.18, Math.min(0.96, 1.08 - dist * 0.013));
+    // P20: FG block — DL OVR scales block chance (base 8%, max ~18%)
+    const dlOvr = state.opponent?.players?.filter(p=>p.pos==='DL').reduce((s,p,_,a)=>s+p.ovr/a.length,0)||70;
+    const blockCh = Math.min(0.18, 0.04 + (dlOvr - 60) * 0.0015);
+    const blocked = Math.random() < blockCh;
     Sound.whistle();
+    if (blocked) {
+      this._tdFlash('BLOCKED! 🚫', '#ef4444');
+      // Opponent recovers at LOS, small chance of return TD
+      const returnTD = Math.random() < 0.12;
+      if (returnTD) {
+        state.score.opp += 6;
+        state.stats.opp.td++;
+        this._tdFlash('RETURN TD! ☠️', '#ef4444');
+        state.possession='team'; state.yardLine=25; state.down=1; state.toGo=10;
+        const result={text:'FG BLOCKED — returned for TD! ☠️',td:true,yards:0,turnover:false};
+        this.time.delayedCall(800,()=>{
+          this.events.emit('playResult',result);
+          const hud=this.scene.get('Hud');
+          hud?.events?.emit('playResult',result); hud?.events?.emit('possessionChange','team');
+          this.time.delayedCall(2200,()=>this._startKickoffReturn());
+        });
+      } else {
+        this._endPlay({yards:0,text:'FG BLOCKED! Opponent ball at the spot.',type:'fg_miss',turnover:true,td:false});
+      }
+      return;
+    }
+    const made = Math.random() < Math.max(0.18, Math.min(0.96, 1.08 - dist * 0.013));
     if (made) {
       state.score.team += 3;
       state.yardLine = 20; // flip in _endPlay will give opponent their 80 (80 yds to score)
@@ -355,6 +582,7 @@ export class FieldScene extends Phaser.Scene {
       const spd = pxs(pData.spd, 38, 0.52) / 60; // convert to per-frame
       this.time.addEvent({ delay: 16, loop: true, callback: () => {
         if (this.phase !== 'run') return;
+        if (this._engagedCvg?.has(dot)) return; // blocked by blocker
         const dx = this.runner.x - dot.x, dy = this.runner.y - dot.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist < 13) { this._tackled(); return; }
@@ -403,17 +631,31 @@ export class FieldScene extends Phaser.Scene {
     this.phase = 'result';
     Sound.tackle();
     if (this._jukeCDBar) { this._jukeCDBar.destroy(); this._jukeCDBar = null; }
+    // Hide kick blockers on tackle
+    this.kickBlocks?.forEach(b => this._show(b, false));
+    this._engagedCvg?.clear();
     this.tweens.add({ targets: this.runner, scaleX: 0.65, scaleY: 0.65, duration: 180, yoyo: true });
     const yards = Math.round((this.runner.x - this.startX) / YARD_W);
     const runnerPos = this.runner === this.qb ? 'QB' : 'RB';
     const rb = (state.team?.players || []).find(p => p.pos === runnerPos) || { str: 70 };
-    const fumCh = Math.max(0.02, 0.055 - (rb.str - 70) * 0.0006);
+    const wxFumM = state.weather==='snow'?1.5:state.weather==='rain'?1.3:1;
+    const fumCh = Math.max(0.02, (0.055 - (rb.str - 70) * 0.0006) * wxFumM);
     if (Math.random() < fumCh) {
       Sound.incomplete();
       state.stats.team.fum = (state.stats.team.fum || 0) + 1;
       this._tdFlash('FUMBLE!', '#ef4444');
       this._endPlay({ yards: 0, text: 'FUMBLE! Possession lost.', type: 'fumble', turnover: true, td: false });
       return;
+    }
+    // Injury check (~7% RB, ~4% QB scramble)
+    const injCh = runnerPos === 'QB' ? 0.04 : 0.07;
+    if (Math.random() < injCh) {
+      const injPl = (state.team?.players || []).find(p => p.pos === runnerPos);
+      if (injPl && !(state.injuries || []).find(x => x.id === injPl.id)) {
+        if (!state.injuries) state.injuries = [];
+        state.injuries.push({ id: injPl.id, pos: runnerPos, weeks: Math.floor(Math.random() * 4) + 1 });
+        this._tdFlash(`${injPl.name.split(' ').pop()} INJURED`, '#ef4444');
+      }
     }
     this._resolvePlay(1.0, 'tackle', yards);
   }
@@ -565,11 +807,21 @@ export class FieldScene extends Phaser.Scene {
     Sound.sack();
     this.recTargets.forEach(r => r?.destroy?.()); this.recTargets = [];
     const loss = Phaser.Math.Between(4, 11);
+    // QB injury on sack (~5%)
+    if (Math.random() < 0.05) {
+      const qb = (state.team?.players || []).find(p => p.pos === 'QB');
+      if (qb && !(state.injuries || []).find(x => x.id === qb.id)) {
+        if (!state.injuries) state.injuries = [];
+        state.injuries.push({ id: qb.id, pos: 'QB', weeks: Math.floor(Math.random() * 3) + 1 });
+        this._tdFlash(`${qb.name.split(' ').pop()} INJURED`, '#ef4444');
+      }
+    }
     this._endPlay({ yards:-loss, text:`SACK! -${loss} yards`, type:'sack', turnover:false, td:false });
   }
 
   _animateRoutes(variant) {
-    const depth = { quick:32, medium:62, deep:110 }[variant] || 62;
+    const rzMul = (state.yardLine >= 80 && state.possession === 'team') ? 0.52 : 1;
+    const depth = ({ quick:32, medium:62, deep:110 }[variant] || 62) * rzMul;
     [{ p:this.wr1, ty: this.wr1.y + (variant==='quick'?22:variant==='deep'?-18:14) },
      { p:this.wr2, ty: this.wr2.y - (variant==='quick'?22:variant==='deep'?-18:14) },
      { p:this.te,  ty: this.te.y  + 16 },
@@ -598,7 +850,8 @@ export class FieldScene extends Phaser.Scene {
     receivers.forEach(({ dot, p }, i) => {
       const cbOvr = dbRatings[i % dbRatings.length] || 75;
       const actBonus = isPlayAction ? 16 : 0;
-      const isOpen = (p.spd||80)+actBonus > (cbOvr+(isZone?-5:0))*0.94 && Math.random() < 0.54+((p.spd||80)+actBonus-cbOvr)/200;
+      const rzCov = state.yardLine >= 80 ? 0.18 : 0;
+      const isOpen = (p.spd||80)+actBonus > (cbOvr+(isZone?-5:0))*0.94 && Math.random() < 0.54+((p.spd||80)+actBonus-cbOvr)/200 - rzCov;
       const zone = this.add.circle(dot.x, dot.y, 20, isOpen?0x22c55e:0xef4444, 0.32)
         .setDepth(8).setInteractive({ useHandCursor:true });
       const icon   = this.add.text(dot.x, dot.y-28, isOpen?'🟢':'🔴', {fontSize:'14px'}).setOrigin(0.5).setDepth(9);
@@ -620,7 +873,8 @@ export class FieldScene extends Phaser.Scene {
         if (this.phase!=='pass_wait' && this.phase!=='pass_flight') return;
         const dx=wr.x-cb.x, dy=wr.y-cb.y, dist=Math.sqrt(dx*dx+dy*dy);
         if (dist<8) return;
-        const s=(spd/90)*0.95; // px/frame at 60fps
+        const rzM = state.yardLine >= 80 ? 1.18 : 1;
+        const s=(spd/90)*0.95*rzM; // px/frame at 60fps; faster in red zone
         cb.x+=(dx/dist)*s; cb.y+=(dy/dist)*s;
         this._syncLbl(cb);
       }});
@@ -682,13 +936,20 @@ export class FieldScene extends Phaser.Scene {
         const variant = call.replace('pass_','');
         const isDeep = variant==='deep' || variant==='action';
         const intCh  = isDeep ? 0.11 : 0.04;
-        const compCh = clamp(0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002, 0.28, 0.88);
+        const wxPassM = state.weather==='snow'?0.80:state.weather==='rain'?0.86:1;
+        const compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002)*wxPassM, 0.22, 0.88);
         if (type==='covered' && Math.random()<intCh*2) {
           Sound.int(); state.stats.team.int++;
           this._track(qb.id,'int',1);
           this._endPlay({ yards:0, text:'INTERCEPTED! Turnover.', type:'int', turnover:true, td:false }); return;
         }
         if (Math.random() > compCh*qteBonus) {
+          // P17: Pass interference ~4% on incompletion
+          if (Math.random() < 0.04) {
+            Sound.whistle(); this._tdFlash('PASS INTERFERENCE!', '#f59e0b');
+            this._track(qb.id,'att',1);
+            this._endPlay({ yards:state.toGo, text:'FLAG — Pass Interference! Auto 1st down.', type:'penalty', turnover:false, td:false }); return;
+          }
           Sound.incomplete(); this._track(qb.id,'att',1);
           this._endPlay({ yards:0, text:'Incomplete.', type:'inc', turnover:false, td:false }); return;
         }
@@ -697,6 +958,11 @@ export class FieldScene extends Phaser.Scene {
       }
     }
 
+    // P17: Holding on run plays (~3% if gain > 3 yards)
+    if (isRun && (yards||0) > 3 && Math.random() < 0.03) {
+      Sound.whistle(); this._tdFlash('HOLDING — 10 yds back', '#f59e0b');
+      yards = Math.max(-10, (yards||0) - 10);
+    }
     const td = state.yardLine + (yards||0) >= 100;
     if (td)                      { Sound.td();        this._tdFlash('TOUCHDOWN! 🏈','#f59e0b'); state.stats.team.td++; }
     else if (yards >= state.toGo){ Sound.firstDown(); }
@@ -730,6 +996,8 @@ export class FieldScene extends Phaser.Scene {
   }
 
   _endPlay(result) {
+    this.kickBlocks?.forEach(b => this._show(b, false));
+    this._engagedCvg?.clear();
     state.lastResult = result;
     if (!state.currentDrive) state.currentDrive = { poss:'team', plays:0, yards:0, start:state.yardLine };
     state.currentDrive.plays++;
@@ -744,7 +1012,7 @@ export class FieldScene extends Phaser.Scene {
       state.possession='opp'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10;
     } else {
       state.yardLine = Math.min(99, state.yardLine + result.yards);
-      if (result.yards >= state.toGo) { state.down=1; state.toGo=10; }
+      if (result.yards >= state.toGo) { state.down=1; state.toGo=10; this._lastPlayGainedFirstDown=true; }
       else { state.down++; state.toGo=Math.max(1,state.toGo-result.yards); }
       if (state.down > 4) { driveEnd='DOWNS'; state.possession='opp'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10; }
     }
@@ -775,9 +1043,44 @@ export class FieldScene extends Phaser.Scene {
         this._resetFormation(); this._drawLines();
         const hud = this.scene.get('Hud');
         hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
-        this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
+        // P23: offer no-huddle after first down
+        if (state.down === 1 && state.toGo === 10 && this._lastPlayGainedFirstDown) {
+          this._showNoHuddleOption();
+        } else {
+          this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
+        }
+        this._lastPlayGainedFirstDown = false;
       });
     }
+  }
+
+  _showNoHuddleOption() {
+    const W=this.scale.width, H=this.scale.height;
+    const bg=this.add.rectangle(W/2,H/2,W,H,0x000000,0.72).setDepth(58);
+    const t=this.add.text(W/2,H/2-40,'FIRST DOWN!',{fontSize:'22px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(59);
+    const mkBtn=(cx,label,sub,hx,cb)=>{
+      const b=this.add.rectangle(cx,H/2+12,158,60,0x0d1424).setDepth(59).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
+      const l=this.add.text(cx,H/2+2,label,{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(60);
+      const s=this.add.text(cx,H/2+18,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(60);
+      b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{[bg,t,b,l,s].forEach(e=>e.destroy());cb();});
+      return[b,l,s];
+    };
+    const launch=()=>{this.scene.launch('PlayCall');this.scene.bringToTop('PlayCall');};
+    const launchNH=()=>{
+      // No-huddle: defenders start slightly out of position
+      [this.cb1,this.cb2].forEach(cb=>{cb.x+=(Math.random()-0.5)*18;cb.y+=(Math.random()-0.5)*18;this._syncLbl(cb);});
+      if(this.lb.visible){this.lb.x+=(Math.random()-0.5)*12;this.lb.y+=(Math.random()-0.5)*12;this._syncLbl(this.lb);}
+      this._onPlayCalled._noHuddle=true;
+      this.scene.launch('PlayCall');this.scene.bringToTop('PlayCall');
+    };
+    mkBtn(W/2-88,'HUDDLE UP','Normal play call',0x334155,launch);
+    mkBtn(W/2+88,'NO HUDDLE 🚀','Defense out of position',0x22c55e,launchNH);
+    // Auto-dismiss after 3.5s
+    this.time.delayedCall(3500,()=>{
+      try{[bg,t].forEach(e=>e.destroy());}catch{}
+      launch();
+    });
   }
 
   _showPATChoice() {
@@ -796,7 +1099,7 @@ export class FieldScene extends Phaser.Scene {
       els.push(b,lbl,s);
     };
     mkBtn(W/2-90,H/2+14,'KICK PAT','+1 pt  •  97%',0x22c55e,()=>this._resolvePAT('kick'));
-    mkBtn(W/2+90,H/2+14,'GO FOR 2','+2 pts  •  45%',0x3b82f6,()=>this._resolvePAT('two'));
+    mkBtn(W/2+90,H/2+14,'GO FOR 2','+2 pts  •  MINI-GAME',0x3b82f6,()=>this._startTwoPointPlay());
   }
 
   _resolvePAT(choice) {
@@ -816,20 +1119,256 @@ export class FieldScene extends Phaser.Scene {
     state.possession='opp'; state.down=1; state.toGo=10;
     this.time.delayedCall(1600,()=>{
       if (state.quarter>4||state.plays>=40) { this.scene.start('GameOver'); return; }
-      this._startKickoffCover();
+      this._showKickoffChoice();
+    });
+  }
+
+  // ─── P26: TWO-POINT MINI-GAME ─────────────────────────────────────────────
+
+  _startTwoPointPlay() {
+    const cy = FIELD_Y + FIELD_H / 2;
+    // Hide all players, show only qb, wr1, dl
+    [...this.offPlayers, ...this.defPlayers].forEach(d => this._show(d, false));
+    this._show(this.qb, true); this._show(this.wr1, true); this._show(this.dl, true);
+    this._place(this.qb,  yardToX(5),  cy);
+    this._place(this.wr1, yardToX(3),  cy - 20);
+    this._place(this.dl,  yardToX(8),  cy);
+    this.ball.x = this.qb.x; this.ball.y = this.qb.y;
+    // Banner
+    const W = this.scale.width, H = this.scale.height;
+    this._tpBanner = this.add.text(W/2, FIELD_Y - 20, 'GO FOR 2 — REACH THE END ZONE', {
+      fontSize:'13px', fontFamily:'monospace', fontStyle:'bold', color:'#3b82f6',
+      stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5).setDepth(20);
+    this._tpTimerEl = this.add.text(W/2, FIELD_Y - 6, '3.5', {
+      fontSize:'10px', fontFamily:'monospace', color:'#94a3b8'
+    }).setOrigin(0.5).setDepth(20);
+    this._tpTimer = 3500;
+    this.phase = 'two_point';
+  }
+
+  _resolveTwoPoint(success, reason='') {
+    if (this.phase !== 'two_point') return;
+    this.phase = 'idle';
+    try { this._tpBanner?.destroy(); this._tpTimerEl?.destroy(); } catch {}
+    [...this.offPlayers, ...this.defPlayers].forEach(d => this._show(d, false));
+    const pts = success ? 2 : 0;
+    state.score.team += pts;
+    const msg = success ? '2-PT GOOD! +2' : ('2-PT FAILED' + (reason ? ' — ' + reason : ''));
+    const col = success ? '#3b82f6' : '#ef4444';
+    if (pts > 0) Sound.td(); else Sound.incomplete();
+    this._tdFlash(msg, col);
+    const hud = this.scene.get('Hud');
+    hud?.events?.emit('playResult', { text:msg, td:false, turnover:false, yards:0 });
+    state.possession = 'opp'; state.down = 1; state.toGo = 10;
+    this.time.delayedCall(1600, () => {
+      if (state.quarter > 4 || state.plays >= 40) { this.scene.start('GameOver'); return; }
+      this._showKickoffChoice();
     });
   }
 
   // ─── AI POSSESSION ────────────────────────────────────────────────────────
 
+  _showGoalLineStand() {
+    const cy = FIELD_Y + FIELD_H / 2;
+    // Hide all, set up goal line formation
+    [...this.offPlayers, ...this.defPlayers].forEach(d => this._show(d, false));
+    // Stack 6 defenders at goal line
+    const defY = [cy-40,cy-24,cy-8,cy+8,cy+24,cy+40];
+    const defDots = [this.dl,this.dl2,this.lb,this.lb2,this.cb1,this.cb2];
+    const goalX = yardToX(2);
+    defDots.forEach((d,i)=>{ this._place(d, goalX-8, defY[i]); this._show(d,true); d._lbl?.setText('DEF'); });
+    // User controls LB (middle)
+    this.userDef = this.lb;
+    this.lb._lbl?.setText('YOU');
+    const dData = state.team?.players?.find(p=>p.pos==='LB')||{spd:76};
+    this._defSpd = pxs(dData.spd, 90, 1.1);
+    // AI runner
+    this._place(this.rb, yardToX(10), cy);
+    this.rb._lbl?.setText('RB');
+    this._show(this.rb, true);
+    const rData = state.opponent?.players?.find(p=>p.pos==='RB')||{spd:78,str:80};
+    this._aiRunSpeed = pxs(rData.str||80, 52, 0.7); // use STR not SPD for goal line power
+    this.aiRunner = this.rb;
+    this.ball.x = this.rb.x; this.ball.y = this.rb.y;
+    this.phase = 'goal_line';
+    this._goalLineTimer = 4000; // 4 seconds to stop them
+    Sound.whistle();
+    this._tdFlash('GOAL LINE STAND! 🛡️', '#3b82f6');
+    const hud = this.scene.get('Hud');
+    hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','opp');
+    this.events.emit('phaseChange','goal_line');
+  }
+
   _startAIDrive() {
     this.aiDown = 1; this.aiToGo = 10;
     this._aiDrivePlays = 0; this._aiDriveYards = 0; this._aiDriveStart = state.yardLine;
+    // P24: goal line stand if AI is inside 3
+    if (state.yardLine <= 3 && state.possession === 'opp') {
+      this._showGoalLineStand();
+      return;
+    }
     this._resetAIFormation();
+    // P25: hurry-up offense when AI trails by 7+ in Q4
+    const isHurryUp = state.quarter >= 4 && (state.score.opp - state.score.team) >= 7;
+    if (isHurryUp) {
+      this._aiHurryUp = true;
+      const W = this.scale.width;
+      const hb = this.add.text(W/2, FIELD_Y+18, 'HURRY-UP OFFENSE — DEFEND THE PASS', {
+        fontSize:'10px', fontFamily:'monospace', fontStyle:'bold', color:'#f97316', stroke:'#000', strokeThickness:2
+      }).setOrigin(0.5).setDepth(25);
+      this.time.delayedCall(1500, () => { hb?.destroy(); this._launchAIDrive(); });
+    } else {
+      this._aiHurryUp = false;
+      this._showDefCall(() => this._launchAIDrive());
+    }
+  }
+
+  _launchAIDrive() {
+    const call = this._defCall || 'cover2';
+    if (call === 'man')          { this._defSpd *= 1.22; this._aiRunSpeed *= 1.06; }
+    else if (call === 'blitz')   { this._aiRunSpeed *= 1.12; this._launchBlitzPursuer(); }
+    else if (call === 'prevent') { this._aiRunSpeed *= 0.84; this._defSpd *= 0.88; }
+    // P25: hurry-up overrides pass chance and speeds up AI RB
+    const passCh = this._aiHurryUp ? 0.65 : ({cover2:0.35, man:0.45, blitz:0.55, prevent:0.20}[call] || 0.35);
+    if (this._aiHurryUp) { this._aiRunSpeed *= 1.08; }
+    if (Math.random() < passCh) { this._startAIPass(); return; }
     this.phase = 'ai_run';
     const hud = this.scene.get('Hud');
+    hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange', 'opp');
+    Sound.whistle();
+  }
+
+  _startAIPass() {
+    this.phase = 'ai_pass';
+    this.dl._lbl?.setText('QB');
+    // QB drops back
+    this.tweens.add({ targets:this.dl, x:this.dl.x+28, duration:380,
+      onUpdate:()=>{ this._syncLbl(this.dl); this.ball.x=this.dl.x; this.ball.y=this.dl.y; }
+    });
+    // Receiver runs route left (toward user end zone)
+    const routeDepth = Phaser.Math.Between(30, 76);
+    const routeY = this.lb.y + Phaser.Math.Between(-26, 26);
+    this._aiRecTarget = { dot:this.lb, routeDepth, endX:this.lb.x-routeDepth, endY:routeY };
+    this.tweens.add({ targets:this.lb, x:this.lb.x-routeDepth, y:routeY, duration:660, ease:'Sine.easeOut',
+      onUpdate:()=>this._syncLbl(this.lb)
+    });
+    // Flash hint
+    const W=this.scale.width;
+    const ht=this.add.text(W/2, FIELD_Y+26, 'PASS PLAY — GET TO THE RECEIVER', {
+      fontSize:'10px', fontFamily:'monospace', fontStyle:'bold', color:'#ef4444', stroke:'#000', strokeThickness:2
+    }).setOrigin(0.5).setDepth(20);
+    this.time.delayedCall(860, ()=>ht?.destroy());
+    const hud=this.scene.get('Hud');
     hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','opp');
     Sound.whistle();
+    this.time.delayedCall(720, ()=>{ if(this.phase==='ai_pass') this._aiThrow(); });
+  }
+
+  _aiThrow() {
+    this.phase = 'ai_pass_flight';
+    const rec = this._aiRecTarget;
+    const sx=this.dl.x, sy=this.dl.y, ex=rec.dot.x, ey=rec.dot.y;
+    const peakY = Math.min(sy,ey)-30;
+    let t=0; const dur=320;
+    const arc=this.time.addEvent({ delay:16, loop:true, callback:()=>{
+      t+=16/dur; if(t>1){arc.remove();this._clearArc();this._resolveAIPass(rec);return;}
+      const bx=Phaser.Math.Linear(sx,ex,t), by=(1-t)*(1-t)*sy+2*(1-t)*t*peakY+t*t*ey;
+      this.ball.x=bx; this.ball.y=by;
+      this.arcGfx.clear(); this.arcGfx.lineStyle(1,0xef4444,0.6); this.arcGfx.lineBetween(sx,sy,bx,by);
+    }});
+  }
+
+  _resolveAIPass(rec) {
+    this.phase='result'; this._clearArc();
+    const call=this._defCall||'cover2';
+    const defDist=Math.hypot(this.rb.x-rec.dot.x, this.rb.y-rec.dot.y);
+    const intThresh=call==='man'?56:call==='cover2'?44:32;
+    if(defDist<intThresh){
+      Sound.int();
+      state.stats.team.int=(state.stats.team.int||0)+1;
+      this._tdFlash('INTERCEPTED! 🏈','#22c55e');
+      this.aiDown=4; this._resolveAIPlay(0); return;
+    }
+    const wrD=(state.opponent?.players||[]).find(p=>p.pos==='WR')||{ovr:78};
+    const cbD=(state.team?.players||[]).find(p=>['CB','S'].includes(p.pos))||{ovr:75};
+    const bonus=call==='blitz'?0.12:call==='prevent'?-0.06:0;
+    const wxCatchM=state.weather==='snow'?0.80:state.weather==='rain'?0.86:1;
+    const catchCh=Math.min(0.88,Math.max(0.22,(0.58+(wrD.ovr-cbD.ovr)*0.007+bonus)*wxCatchM));
+    if(Math.random()>catchCh){ Sound.incomplete(); this._resolveAIPlay(0); return; }
+    const yards=Math.max(1,Math.round(rec.routeDepth/YARD_W)+Phaser.Math.Between(-1,3));
+    state.stats.opp.passYds=(state.stats.opp.passYds||0)+yards;
+    if(state.yardLine-yards<=0){
+      Sound.td(); this._tdFlash('OPPONENT TD! ☠️','#ef4444');
+      state.score.opp+=7; state.stats.opp.td++;
+      state.drives.push({poss:'opp',plays:(this._aiDrivePlays||0)+1,yards:(this._aiDriveYards||0)+yards,start:this._aiDriveStart||25,result:'TD'});
+      this._aiDrivePlays=0; this._aiDriveYards=0;
+      state.possession='team'; state.yardLine=25; state.down=1; state.toGo=10; state.plays++;
+      if(state.plays%8===0)state.quarter=Math.min(4,state.quarter+1);
+      const result={text:'OPPONENT TOUCHDOWN! ☠️',td:true,yards:0,turnover:false};
+      this.events.emit('playResult',result);
+      const hud=this.scene.get('Hud');
+      hud?.events?.emit('playResult',result); hud?.events?.emit('possessionChange','team');
+      if(!state._halfShown&&state.quarter>=3){state._halfShown=true;this.time.delayedCall(1600,()=>this._showHalftime());return;}
+      if(state.quarter>4||state.plays>=40){this.time.delayedCall(2000,()=>this.scene.start('GameOver'));}
+      else{this.time.delayedCall(2400,()=>this._startKickoffReturn());}
+      return;
+    }
+    Sound.firstDown();
+    this._resolveAIPlay(yards);
+  }
+
+  _launchBlitzPursuer() {
+    const pursuer = this.c;
+    this._place(pursuer, this.aiRunner.x + 40, this.aiRunner.y + Phaser.Math.Between(-40, 40));
+    pursuer._lbl?.setText('LB');
+    this._show(pursuer, true);
+    const pData = (state.team?.players || []).find(p => p.pos === 'LB') || { spd: 74 };
+    const spd = pxs(pData.spd, 44, 0.55) / 60;
+    this.time.addEvent({ delay: 16, loop: true, callback: () => {
+      if (this.phase !== 'ai_run') return;
+      const dx = this.aiRunner.x - pursuer.x, dy = this.aiRunner.y - pursuer.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < 18) { this._userTackle(); return; }
+      pursuer.x += (dx/dist)*spd; pursuer.y += (dy/dist)*spd;
+      this._syncLbl(pursuer);
+    }});
+  }
+
+  _showDefCall(onSelect) {
+    const W = this.scale.width, H = this.scale.height;
+    const panelW = 370, panelH = 280;
+    const px = W/2, py = H - panelH/2 - 8;
+    const els = [];
+    const cleanup = () => els.forEach(e => e?.destroy?.());
+    els.push(this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.88).setDepth(35));
+    els.push(this.add.rectangle(px, py, panelW, panelH, 0x0d1424, 1).setDepth(36).setStrokeStyle(1, 0x334155));
+    els.push(this.add.text(px, py - panelH/2 + 14, '🛡  CALL YOUR DEFENSE', {
+      fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#f1f5f9', letterSpacing:2
+    }).setOrigin(0.5, 0).setDepth(37));
+    els.push(this.add.text(px, py - panelH/2 + 30, `OPP BALL  •  yd ${Math.max(1, 100 - state.yardLine)}`, {
+      fontSize:'10px', fontFamily:'monospace', color:'#64748b'
+    }).setOrigin(0.5, 0).setDepth(37));
+    const DCALLS = [
+      { id:'cover2',  label:'Cover 2',   tip:'Deep safeties — limit big plays', col:'#3b82f6' },
+      { id:'man',     label:'Man Press', tip:'+22% DEF spd  •  AI +6% spd',     col:'#22c55e' },
+      { id:'blitz',   label:'Blitz',     tip:'Extra pursuer  •  AI +12% spd',   col:'#ef4444' },
+      { id:'prevent', label:'Prevent',   tip:'AI -16% spd  •  DEF -12% — safe', col:'#f59e0b' },
+    ];
+    const btnW = 166, btnH = 48, startY = py - panelH/2 + 72;
+    DCALLS.forEach((c, i) => {
+      const cx = i%2===0 ? px-96 : px+96;
+      const cy = startY + Math.floor(i/2)*(btnH+6);
+      const accent = Phaser.Display.Color.HexStringToColor(c.col).color;
+      const bg = this.add.rectangle(cx, cy, btnW, btnH, 0x1a2438, 1)
+        .setDepth(37).setStrokeStyle(1, accent, 0.35).setInteractive({ useHandCursor:true });
+      const lbl = this.add.text(cx, cy-8, c.label, { fontSize:'11px', fontFamily:'monospace', fontStyle:'bold', color:'#e2e8f0' }).setOrigin(0.5).setDepth(38);
+      const tip = this.add.text(cx, cy+9, c.tip, { fontSize:'8px', fontFamily:'monospace', color:'#475569' }).setOrigin(0.5).setDepth(38);
+      bg.on('pointerover', ()=>{ bg.setFillStyle(accent,0.18); lbl.setColor(c.col); tip.setColor('#94a3b8'); });
+      bg.on('pointerout',  ()=>{ bg.setFillStyle(0x1a2438,1); lbl.setColor('#e2e8f0'); tip.setColor('#475569'); });
+      bg.on('pointerdown', ()=>{ cleanup(); this._defCall=c.id; onSelect(); });
+      els.push(bg, lbl, tip);
+    });
   }
 
   _userTackle() {
@@ -962,6 +1501,13 @@ export class FieldScene extends Phaser.Scene {
     const cvgYards=[38,44,50,54,58,62,68];
     const offsets=[-72,-40,-16,0,16,40,72];
     cvgDots.forEach((d,i)=>{this._place(d,yardToX(cvgYards[i]),cy+offsets[i]);this._show(d,true);d._lbl?.setText('CVG');});
+    // P18: position wedge blockers ahead of returner
+    this._engagedCvg.clear();
+    const blkOffsets=[[-5,-30],[-5,0],[-5,30]];
+    this.kickBlocks.forEach((b,i)=>{
+      this._place(b,yardToX(catchYard+10)+blkOffsets[i][0],cy+blkOffsets[i][1]);
+      this._show(b,true);
+    });
     this.phase='run'; this.jukeCD=0;
     this._clearPassRush(); this._drawLines();
     this._aiRushers([this.dl,this.dl2,this.lb,this.lb2]);
@@ -977,6 +1523,53 @@ export class FieldScene extends Phaser.Scene {
     const hud=this.scene.get('Hud');
     hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
     this.events.emit('phaseChange','run');
+  }
+
+  // P21: Kickoff choice — normal kickoff or onside attempt
+  _showKickoffChoice() {
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const cleanup=()=>els.forEach(e=>e?.destroy?.());
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(60));
+    els.push(this.add.text(W/2,H/2-70,'KICKOFF',{fontSize:'22px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
+    const mkBtn=(cx,cy,label,sub,hx,cb)=>{
+      const b=this.add.rectangle(cx,cy,170,64,0x0d1424).setDepth(61).setStrokeStyle(1,hx,0.7).setInteractive({useHandCursor:true});
+      const lbl=this.add.text(cx,cy-10,label,{fontSize:'13px',fontFamily:'monospace',fontStyle:'bold',color:'#'+hx.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);
+      const s=this.add.text(cx,cy+10,sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);
+      b.on('pointerover',()=>b.setFillStyle(hx,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{cleanup();cb();});
+      els.push(b,lbl,s);
+    };
+    mkBtn(W/2-95,H/2+10,'KICK DEEP','Normal kickoff',0x22c55e,()=>this._startKickoffCover());
+    mkBtn(W/2+95,H/2+10,'ONSIDE','~15% recovery chance',0xf59e0b,()=>this._resolveOnsideKick());
+  }
+
+  // P21: Resolve onside kick attempt
+  _resolveOnsideKick() {
+    // Recovery chance: base 15%, improves slightly with ST OVR
+    const stOvr = state.team?.players?.filter(p=>p.pos==='K').reduce((s,p,_,a)=>s+p.ovr/a.length,0)||70;
+    const recoverCh = Math.min(0.28, 0.10 + (stOvr-60)*0.002);
+    const recovered = Math.random() < recoverCh;
+    Sound.whistle();
+    if (recovered) {
+      // User team recovers — start at ~50 yard line
+      state.possession='team'; state.yardLine=50; state.down=1; state.toGo=10;
+      this._tdFlash('ONSIDE RECOVERED! 🎉','#f59e0b');
+      this.time.delayedCall(1800,()=>{
+        this._resetFormation(); this._drawLines();
+        const hud=this.scene.get('Hud');
+        hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
+        this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
+      });
+    } else {
+      // Opponent recovers at ~45 yard line
+      state.possession='opp'; state.yardLine=Math.max(40,100-45); state.down=1; state.toGo=10;
+      this._tdFlash('ONSIDE FAILED','#ef4444');
+      this.time.delayedCall(1800,()=>{
+        if(state.quarter>4||state.plays>=40){this.scene.start('GameOver');return;}
+        this._startAIDrive();
+      });
+    }
   }
 
   // AI returns kickoff (after user TD or FG)
@@ -1020,6 +1613,182 @@ export class FieldScene extends Phaser.Scene {
       }
       this.jukeCD-=delta;
       if (Phaser.Input.Keyboard.JustDown(k.sp) && this.jukeCD<=0) this._doJuke();
+      // P18: move kick blockers in wedge ahead of runner, check engagements
+      if (this.kickBlocks?.[0]?.visible) {
+        const blkOff=[[-5,-30],[-5,0],[-5,30]];
+        this.kickBlocks.forEach((b,i)=>{
+          if(!b.visible)return;
+          const tx=this.runner.x+30+blkOff[i][0], ty=this.runner.y+blkOff[i][1];
+          b.x+=(tx-b.x)*0.09; b.y+=(ty-b.y)*0.09; this._syncLbl(b);
+        });
+        const cvgDots=[this.dl,this.dl2,this.lb,this.lb2,this.cb1,this.cb2];
+        cvgDots.forEach(cov=>{
+          if(!cov.visible||this._engagedCvg.has(cov))return;
+          this.kickBlocks.forEach(b=>{
+            if(!b.visible)return;
+            if(Math.hypot(b.x-cov.x,b.y-cov.y)<20){
+              this._engagedCvg.add(cov);
+              this.time.delayedCall(1800,()=>this._engagedCvg.delete(cov));
+            }
+          });
+        });
+      }
+      return;
+    }
+
+    // P19: PUNT RETURN — user controls defender
+    if (this.phase === 'punt_return') {
+      const k = this.keys, dp = this._dpadState;
+      const dt = delta / 1000;
+      const spd = this._defSpd * dt;
+      if (k.rt.isDown||k.d.isDown||dp.dx>0) { this.userDef.x+=spd; }
+      if (k.lt.isDown||k.a.isDown||dp.dx<0) { this.userDef.x-=spd; }
+      if (k.up.isDown||k.w.isDown||dp.dy<0) { this.userDef.y-=spd; }
+      if (k.dn.isDown||k.s.isDown||dp.dy>0) { this.userDef.y+=spd; }
+      this.userDef.y = clamp(this.userDef.y, FIELD_Y+10, FIELD_Y+FIELD_H-10);
+      this._syncLbl(this.userDef);
+
+      // AI returner runs toward user endzone (decreasing x)
+      this._aiJukeCD -= delta;
+      if(Math.random()<0.01) this._aiAngle=(Math.random()-0.5)*0.5;
+      const aispd = this._aiRunSpeed * dt;
+      this.puntRunner.x -= aispd * Math.cos(this._aiAngle);
+      this.puntRunner.y += aispd * Math.sin(this._aiAngle) * 0.5;
+      this.puntRunner.y = clamp(this.puntRunner.y, FIELD_Y+10, FIELD_Y+FIELD_H-10);
+      this.ball.x = this.puntRunner.x; this.ball.y = this.puntRunner.y;
+      this._syncLbl(this.puntRunner);
+
+      // Move punt blockers ahead of returner
+      if(this.puntBlocks?.[0]?.visible) {
+        const blkOff = [[-5,-26],[-5,26]];
+        this.puntBlocks.forEach((b,i)=>{
+          if(!b.visible)return;
+          const tx=this.puntRunner.x-24+blkOff[i][0], ty=this.puntRunner.y+blkOff[i][1];
+          b.x+=(tx-b.x)*0.1; b.y+=(ty-b.y)*0.1; this._syncLbl(b);
+          // Block user defender if in range
+          if(!this._puntEngaged.has(b)&&Math.hypot(b.x-this.userDef.x,b.y-this.userDef.y)<22){
+            this._puntEngaged.add(b);
+            this.time.delayedCall(1400,()=>this._puntEngaged.delete(b));
+          }
+        });
+      }
+      // If user defender is blocked, slow them
+      const isBlocked = [...this._puntEngaged].some(b=>Math.hypot(b.x-this.userDef.x,b.y-this.userDef.y)<30);
+
+      // Check user tackle
+      const dist = Math.hypot(this.puntRunner.x-this.userDef.x, this.puntRunner.y-this.userDef.y);
+      if(dist<14 && !isBlocked) { this._puntTackled(); return; }
+
+      // Returner scores if reaches user endzone
+      if(this.puntRunner.x <= FIELD_LEFT) {
+        this.phase='result';
+        this.puntBlocks?.forEach(b=>this._show(b,false));
+        state.score.opp += 6;
+        state.stats.opp.td++;
+        state.possession='team'; state.yardLine=25; state.down=1; state.toGo=10;
+        this._tdFlash('PUNT RETURN TD! ☠️','#ef4444');
+        const result={text:'PUNT RETURN TOUCHDOWN!',td:true,yards:0,turnover:false};
+        this.events.emit('playResult',result);
+        const hud=this.scene.get('Hud');
+        hud?.events?.emit('playResult',result); hud?.events?.emit('possessionChange','team');
+        this.time.delayedCall(2200,()=>this._startKickoffReturn());
+        return;
+      }
+      return;
+    }
+
+    // P22: MUFFED PUNT — user rushes to ball
+    if (this.phase === 'muffed_punt') {
+      const k = this.keys, dp = this._dpadState, dt = delta / 1000;
+      const spd = this._defSpd * dt;
+      if (k.rt.isDown||k.d.isDown||dp.dx>0) this.userDef.x += spd;
+      if (k.lt.isDown||k.a.isDown||dp.dx<0) this.userDef.x -= spd;
+      if (k.up.isDown||k.w.isDown||dp.dy<0) this.userDef.y -= spd;
+      if (k.dn.isDown||k.s.isDown||dp.dy>0) this.userDef.y += spd;
+      this.userDef.y = clamp(this.userDef.y, FIELD_Y+10, FIELD_Y+FIELD_H-10);
+      this._syncLbl(this.userDef);
+      // AI rushes toward ball too
+      const adx = this.ball.x - this.dl.x, ady = this.ball.y - this.dl.y, ad = Math.sqrt(adx*adx+ady*ady);
+      if (ad > 5) { this.dl.x += (adx/ad)*spd*0.9; this.dl.y += (ady/ad)*spd*0.9; this._syncLbl(this.dl); }
+      // User touches ball first — instant recovery
+      const udist = Math.hypot(this.userDef.x - this.ball.x, this.userDef.y - this.ball.y);
+      if (udist < 14) {
+        this.phase = 'result';
+        state.possession = 'team'; state.yardLine = this._muffYard; state.down = 1; state.toGo = 10;
+        this._show(this.lb, false); this._show(this.dl, false);
+        this._tdFlash('RECOVERED! 🎉', '#22c55e');
+        this._endPlay({ yards:0, text:`MUFFED PUNT recovered by ${state.team?.ab||'YOU'}!`, type:'fumble', turnover:false, td:false });
+        return;
+      }
+      return;
+    }
+
+    // P26: TWO-POINT MINI-GAME
+    if (this.phase === 'two_point') {
+      const spd = this.runSpd * dt;
+      if (k.rt.isDown||k.d.isDown||dp.dx>0) { this.qb.x+=spd; }
+      if (k.lt.isDown||k.a.isDown||dp.dx<0) { this.qb.x-=spd*0.65; }
+      if (k.up.isDown||k.w.isDown||dp.dy<0) { this.qb.y-=spd*0.82; }
+      if (k.dn.isDown||k.s.isDown||dp.dy>0) { this.qb.y+=spd*0.82; }
+      this.qb.y = clamp(this.qb.y, FIELD_Y+10, FIELD_Y+FIELD_H-10);
+      this.ball.x = this.qb.x; this.ball.y = this.qb.y;
+      this._syncLbl(this.qb);
+      // DL pursues QB at speed 55 px/s
+      const ddx = this.qb.x - this.dl.x, ddy = this.qb.y - this.dl.y, ddist = Math.sqrt(ddx*ddx+ddy*ddy);
+      if (ddist > 4) { const ds = 55*dt; this.dl.x += (ddx/ddist)*ds; this.dl.y += (ddy/ddist)*ds; this._syncLbl(this.dl); }
+      // QB reaches end zone
+      if (this.qb.x <= yardToX(0) + 8) { this._resolveTwoPoint(true); return; }
+      // DL tackles QB
+      if (ddist < 16) { this._resolveTwoPoint(false, 'TACKLED'); return; }
+      // Timer
+      this._tpTimer -= delta;
+      if (this._tpTimerEl) this._tpTimerEl.setText((Math.max(0, this._tpTimer) / 1000).toFixed(1));
+      if (this._tpTimer <= 0) { this._resolveTwoPoint(false, 'TIME'); return; }
+      return;
+    }
+
+    // P24: GOAL LINE STAND
+    if (this.phase === 'goal_line') {
+      const k = this.keys, dp = this._dpadState, dt = delta / 1000;
+      // User controls defender
+      const spd = this._defSpd * dt;
+      if (k.rt.isDown||k.d.isDown||dp.dx>0) this.userDef.x += spd;
+      if (k.lt.isDown||k.a.isDown||dp.dx<0) this.userDef.x -= spd;
+      if (k.up.isDown||k.w.isDown||dp.dy<0) this.userDef.y -= spd;
+      if (k.dn.isDown||k.s.isDown||dp.dy>0) this.userDef.y += spd;
+      this.userDef.y = clamp(this.userDef.y, FIELD_Y+10, FIELD_Y+FIELD_H-10);
+      this._syncLbl(this.userDef);
+      // AI runner powers forward
+      const aispd = this._aiRunSpeed * dt;
+      this.aiRunner.x -= aispd;
+      this.ball.x = this.aiRunner.x; this.ball.y = this.aiRunner.y;
+      this._syncLbl(this.aiRunner);
+      this._goalLineTimer -= delta;
+      // User tackle
+      const udist = Math.hypot(this.userDef.x-this.aiRunner.x, this.userDef.y-this.aiRunner.y);
+      if (udist < 16) {
+        this.phase = 'result';
+        [...this.offPlayers,...this.defPlayers].forEach(d=>this._show(d,false));
+        this._tdFlash('STOPPED! 💪', '#22c55e');
+        state.possession='team'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10;
+        const result={text:'Goal line stand! Turnover on downs.',yards:0,td:false,turnover:false};
+        this.events.emit('playResult',result);
+        const hud=this.scene.get('Hud');
+        hud?.events?.emit('playResult',result); hud?.events?.emit('possessionChange','team');
+        this.time.delayedCall(1800,()=>{
+          this._resetFormation(); this._drawLines();
+          hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','team');
+          this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall');
+        });
+        return;
+      }
+      // AI scores if they reach the goal line or timer expires
+      if (this.aiRunner.x <= FIELD_LEFT || this._goalLineTimer <= 0) {
+        this.phase = 'result';
+        [...this.offPlayers,...this.defPlayers].forEach(d=>this._show(d,false));
+        this._aiTouchdown();
+        return;
+      }
       return;
     }
 
@@ -1057,6 +1826,17 @@ export class FieldScene extends Phaser.Scene {
 
       if (Math.hypot(this.userDef.x-this.aiRunner.x, this.userDef.y-this.aiRunner.y) < 18) { this._userTackle(); return; }
       if (this.aiRunner.x <= FIELD_LEFT) { this._aiTouchdown(); return; }
+    }
+
+    // AI POSSESSION — user covers receiver during pass play
+    if (this.phase === 'ai_pass') {
+      const dspd = this._defSpd*dt;
+      if (k.rt.isDown||k.d.isDown||dp.dx>0) this.userDef.x+=dspd;
+      if (k.lt.isDown||k.a.isDown||dp.dx<0) this.userDef.x-=dspd*0.9;
+      if (k.up.isDown||k.w.isDown||dp.dy<0) this.userDef.y-=dspd;
+      if (k.dn.isDown||k.s.isDown||dp.dy>0) this.userDef.y+=dspd;
+      this.userDef.y=clamp(this.userDef.y,FIELD_Y+10,FIELD_Y+FIELD_H-10);
+      this._syncLbl(this.userDef);
     }
   }
 }

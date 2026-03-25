@@ -11,6 +11,8 @@ export class BootScene extends Phaser.Scene {
     const { team, opponent, week, season } = loadRoster();
     state.team = team;
     state.opponent = opponent;
+    const wxRoll = Math.random();
+    state.weather = wxRoll < 0.60 ? 'clear' : wxRoll < 0.83 ? 'rain' : 'snow';
     track('game_boot', { week: week||0, season: season||0 });
 
     this.add.rectangle(W/2, H/2, W, H, 0x0a0f1a);
@@ -81,6 +83,13 @@ export class BootScene extends Phaser.Scene {
         }).setOrigin(0.5);
       });
     }
+
+    // Weather badge
+    const wxLabel = { clear:'☀️ CLEAR', rain:'🌧️ RAIN', snow:'❄️ SNOW' }[state.weather];
+    const wxClr   = { clear:'#f59e0b',  rain:'#3b82f6',  snow:'#93c5fd'  }[state.weather];
+    this.add.text(W/2, H/2 + 82, wxLabel, {
+      fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:wxClr, letterSpacing:3
+    }).setOrigin(0.5);
 
     // Kick Off button
     const btn = this.add.rectangle(W/2, H/2 + 100, 210, 46, 0x22c55e).setInteractive({ useHandCursor:true });

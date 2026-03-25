@@ -74,8 +74,19 @@ export class GameOverScene extends Phaser.Scene {
       });
     }
 
+    // Injury report
+    if (state.injuries && state.injuries.length > 0) {
+      const injNames = state.injuries.map(i => {
+        const pl = state.team?.players?.find(p => p.id === i.id);
+        return `${pl?.name?.split(' ').pop() || i.pos} (${i.weeks}wk)`;
+      }).join(', ');
+      this.add.text(W/2, 376, `🚑 INJURED: ${injNames}`, {
+        fontSize:'9px', fontFamily:'monospace', color:'#ef4444'
+      }).setOrigin(0.5);
+    }
+
     // Export notice
-    this.add.text(W/2, 390, '✅ Stats saved — import to Gridiron GM to update your season', {
+    this.add.text(W/2, 392, '✅ Stats saved — import to Gridiron GM to update your season', {
       fontSize:'9px', fontFamily:'monospace', color:'#334155'
     }).setOrigin(0.5);
 
