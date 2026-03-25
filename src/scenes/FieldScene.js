@@ -325,6 +325,8 @@ export class FieldScene extends Phaser.Scene {
       if (callId.startsWith('run_') && !this._noHuddleActive && Math.random() < 0.15) this._showTrickOption(callId);
       else this._startRun(callId);
     }
+    else if (callId === 'screen_pass')                                    this._startScreenPass();
+    else if (callId === 'pass_action')                                    this._startPlayAction();
     else if (callId.startsWith('pass_')) {
       if (state.yardLine <= 15 && !this._noHuddleActive) this._showFadeOption(callId);
       else this._startPass(callId);
@@ -636,18 +638,46 @@ export class FieldScene extends Phaser.Scene {
 
   _tackled() {
     if (this.phase !== 'run') return;
-    this.phase = 'result';
     Sound.tackle();
     if (this._jukeCDBar) { this._jukeCDBar.destroy(); this._jukeCDBar = null; }
-    // Hide kick blockers on tackle
     this.kickBlocks?.forEach(b => this._show(b, false));
     this._engagedCvg?.clear();
     this.tweens.add({ targets: this.runner, scaleX: 0.65, scaleY: 0.65, duration: 180, yoyo: true });
     const yards = Math.round((this.runner.x - this.startX) / YARD_W);
+    if (yards > 7) {
+      this.phase = 'fumble_risk';
+      this._showFumbleRisk(yards);
+    } else {
+      this.phase = 'result';
+      this._resolveTackle(yards, 99);
+    }
+  }
+
+  // ─── P34: FUMBLE RISK ─────────────────────────────────────────────────────
+
+  _showFumbleRisk(yards) {
+    const W=this.scale.width, H=this.scale.height;
+    let taps=0;
+    const els=[];
+    const bg=this.add.rectangle(W/2,H/2-30,200,56,0xef4444,0.92).setDepth(25).setInteractive({useHandCursor:true});
+    const lbl=this.add.text(W/2,H/2-42,'💥 HOLD ON! TAP FAST!',{fontSize:'13px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(26);
+    const ctr=this.add.text(W/2,H/2-18,'0 / 4',{fontSize:'11px',fontFamily:'monospace',color:'#fef08a'}).setOrigin(0.5).setDepth(26);
+    els.push(bg,lbl,ctr);
+    bg.on('pointerdown',()=>{ taps++; ctr.setText(`${taps} / 4`); });
+    this.time.delayedCall(1400,()=>{
+      els.forEach(e=>e?.destroy?.());
+      this.phase='result';
+      this._resolveTackle(yards, taps);
+    });
+  }
+
+  _resolveTackle(yards, taps) {
     const runnerPos = this.runner === this.qb ? 'QB' : 'RB';
     const rb = (state.team?.players || []).find(p => p.pos === runnerPos) || { str: 70 };
     const wxFumM = state.weather==='snow'?1.5:state.weather==='rain'?1.3:1;
-    const fumCh = Math.max(0.02, (0.055 - (rb.str - 70) * 0.0006) * wxFumM);
+    let fumCh = Math.max(0.02, (0.055 - (rb.str - 70) * 0.0006) * wxFumM);
+    if (taps < 2) fumCh = Math.min(0.60, fumCh * 4);
+    else if (taps >= 4) fumCh *= 0.25;
     if (Math.random() < fumCh) {
       Sound.incomplete();
       state.stats.team.fum = (state.stats.team.fum || 0) + 1;
@@ -655,7 +685,6 @@ export class FieldScene extends Phaser.Scene {
       this._endPlay({ yards: 0, text: 'FUMBLE! Possession lost.', type: 'fumble', turnover: true, td: false });
       return;
     }
-    // Injury check (~7% RB, ~4% QB scramble)
     const injCh = runnerPos === 'QB' ? 0.04 : 0.07;
     if (Math.random() < injCh) {
       const injPl = (state.team?.players || []).find(p => p.pos === runnerPos);
@@ -2114,5 +2143,86 @@ export class FieldScene extends Phaser.Scene {
       this._tdFlash('KNOCKED AWAY!','#ef4444');
       this._endPlay({yards:0,text:'Fade — pass broken up in end zone',type:'pass',turnover:false,td:false});
     }
+  }
+
+  // ─── P32: SCREEN PASS ─────────────────────────────────────────────────────
+
+  _startScreenPass() {
+    const cy=FIELD_Y+FIELD_H/2, W=this.scale.width, H=this.scale.height;
+    this.phase='screen_pass';
+    [...this.offPlayers,...this.defPlayers].forEach(d=>this._show(d,false));
+    this._show(this.qb,true); this._show(this.rb,true); this._show(this.cb1,true);
+    const qbX=yardToX(Math.max(5,state.yardLine-5));
+    const flatX=yardToX(Math.max(8,state.yardLine-2));
+    this._place(this.qb,qbX,cy); this._place(this.rb,qbX-18,cy+30); this._place(this.cb1,flatX+18,cy+32);
+    this.qb._lbl?.setText('QB'); this.rb._lbl?.setText('RB'); this.cb1._lbl?.setText('CB');
+    this.ball.x=this.qb.x; this.ball.y=this.qb.y;
+    const banner=this.add.text(W/2,FIELD_Y-20,'🏈 SCREEN PASS — HIT THE FLAT',{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(20);
+    this._screenEls=[banner];
+    this.tweens.add({targets:this.rb,x:flatX,y:cy+30,duration:580,ease:'Quad.easeOut',onUpdate:()=>this._syncLbl(this.rb)});
+    let throwPressed=false;
+    this._screenThrowTimer=this.time.delayedCall(520,()=>{
+      if(this.phase!=='screen_pass')return;
+      const btn=this.add.text(W/2,H/2,'🏈 THROW!',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',backgroundColor:'#052e16',padding:{x:14,y:8},stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(25).setInteractive({useHandCursor:true});
+      btn.once('pointerdown',()=>{throwPressed=true;btn.destroy();});
+      this._screenEls.push(btn);
+    });
+    this._screenResolveTimer=this.time.delayedCall(1300,()=>{
+      if(this.phase!=='screen_pass')return;
+      this._screenEls?.forEach(e=>e?.destroy?.()); this._screenEls=null;
+      this.phase='result';
+      if(!throwPressed){Sound.incomplete();this._endPlay({yards:0,text:'Screen — held too long, incomplete',type:'inc',turnover:false,td:false});return;}
+      const rbOvr=(state.team?.players||[]).find(p=>p.pos==='RB')?.ovr||72;
+      const cbOvr=(state.opponent?.players||[]).find(p=>['CB','S'].includes(p.pos))?.ovr||75;
+      const roll=Math.random();
+      if(roll<0.05){Sound.incomplete();state.stats.team.int=(state.stats.team.int||0)+1;this._tdFlash('SCREEN PICKED!','#ef4444');this._endPlay({yards:0,text:'Screen pass INTERCEPTED!',type:'int',turnover:true,td:false});return;}
+      if(roll<0.20&&cbOvr>rbOvr+3){Sound.tackle();this._endPlay({yards:-2,text:'Screen sniffed out — stuffed for loss!',type:'run',turnover:false,td:false});return;}
+      const yds=Phaser.Math.Between(3,10);
+      const td=state.yardLine-yds<=0;
+      if(td){Sound.td?.();this._tdFlash('TOUCHDOWN! 🏈','#22c55e');this._endPlay({yards:state.yardLine,text:'Screen pass TOUCHDOWN!',type:'td',turnover:false,td:true});}
+      else{this._endPlay({yards:yds,text:`Screen pass — ${yds} yard gain`,type:'run',turnover:false,td:false});}
+    });
+  }
+
+  // ─── P33: PLAY ACTION PASS ────────────────────────────────────────────────
+
+  _startPlayAction() {
+    const cy=FIELD_Y+FIELD_H/2, W=this.scale.width;
+    this.phase='play_action';
+    [...this.offPlayers,...this.defPlayers].forEach(d=>this._show(d,false));
+    this._show(this.qb,true); this._show(this.rb,true); this._show(this.wr1,true); this._show(this.cb1,true);
+    const qbX=yardToX(Math.max(5,state.yardLine-5));
+    this._place(this.qb,qbX,cy); this._place(this.rb,qbX-18,cy+25);
+    this._place(this.wr1,qbX+45,cy-52); this._place(this.cb1,qbX+48,cy-52);
+    this.qb._lbl?.setText('QB'); this.rb._lbl?.setText('RB'); this.wr1._lbl?.setText('WR'); this.cb1._lbl?.setText('CB');
+    this.ball.x=this.qb.x; this.ball.y=this.qb.y;
+    const banner=this.add.text(W/2,FIELD_Y-20,'🎯 PLAY ACTION — DBs FROZEN!',{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#a78bfa',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(20);
+    // QB fake: ball moves toward RB then snaps back
+    this.tweens.add({targets:this.ball,x:this.rb.x,y:this.rb.y,duration:280,ease:'Linear',onComplete:()=>{
+      this.tweens.add({targets:this.ball,x:this.qb.x,y:this.qb.y,duration:140,ease:'Linear'});
+    }});
+    this.tweens.add({targets:this.rb,x:this.rb.x+28,y:this.rb.y,duration:320,ease:'Quad.easeOut',onUpdate:()=>this._syncLbl(this.rb)});
+    // CB bites on run fake — drifts upfield
+    this.tweens.add({targets:this.cb1,x:this.cb1.x-28,y:this.cb1.y+18,duration:420,ease:'Quad.easeOut',onUpdate:()=>this._syncLbl(this.cb1)});
+    this.time.delayedCall(680,()=>{ banner?.destroy(); this._resolvePlayAction(); });
+  }
+
+  _resolvePlayAction() {
+    this.phase='result';
+    const qbOvr=(state.team?.players||[]).find(p=>p.pos==='QB')?.ovr||78;
+    const wrOvr=(state.team?.players||[]).find(p=>p.pos==='WR')?.ovr||75;
+    const cbOvr=(state.opponent?.players||[]).find(p=>['CB','S'].includes(p.pos))?.ovr||75;
+    const wxM=state.weather==='snow'?0.82:state.weather==='rain'?0.88:1;
+    const compRate=Math.min(0.88,Math.max(0.42,(0.65+(qbOvr-70)*0.01+(wrOvr-cbOvr)*0.008)*wxM));
+    const roll=Math.random();
+    if(roll<0.04){Sound.incomplete?.();state.stats.team.int=(state.stats.team.int||0)+1;this._tdFlash('PLAY ACTION INT!','#ef4444');this._endPlay({yards:0,text:'Play action INT — defense not fooled!',type:'int',turnover:true,td:false});return;}
+    if(roll<compRate+0.04){
+      const yds=Phaser.Math.Between(10,28);
+      const td=state.yardLine-yds<=0;
+      if(td){Sound.td?.();this._tdFlash('TOUCHDOWN! 🎯','#a78bfa');this._endPlay({yards:state.yardLine,text:'Play Action TD — WR wide open!',type:'td',turnover:false,td:true});}
+      else{Sound.firstDown?.();this._endPlay({yards:yds,text:`Play action — ${yds} yard gain`,type:'pass',turnover:false,td:false});}
+      return;
+    }
+    Sound.incomplete?.();this._endPlay({yards:0,text:'Play action — WR covered, incomplete',type:'pass',turnover:false,td:false});
   }
 }

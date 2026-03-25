@@ -9,6 +9,7 @@ const CALLS = [
   { id:'pass_medium', label:'Medium Route', cat:'pass', tip:'Balanced timing' },
   { id:'pass_deep',   label:'Deep Shot',    cat:'pass', tip:'High risk / reward' },
   { id:'pass_action', label:'Play Action',  cat:'pass', tip:'Fake run — freezes DBs' },
+  { id:'screen_pass', label:'Screen Pass',  cat:'pass', tip:'RB flat — linemen release' },
 ];
 
 export class PlayCallScene extends Phaser.Scene {
