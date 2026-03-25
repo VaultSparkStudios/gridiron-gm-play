@@ -4,6 +4,18 @@ Append entries. Do not edit historical entries.
 
 ---
 
+## 2026-03-25 (session 16 — P64–P68)
+
+- Session: P64–P68 — 5 Phaser features
+- P64: No-Huddle Hurry-Up (HURRY UP button after incomplete, 15s saved, -5% comp next play, _hurryUpActive/_hurryUpPenalty)
+- P65: Receiver Route Tree (CURL/POST/CORNER/GO selector, 3s auto-CURL, _routeChoice compMod/yardMod)
+- P66: Defensive Pass Rush Lane (INSIDE/OUTSIDE on AI passes, sack%/coverage% mods, _rushLane)
+- P67: QB Checkdown Under Pressure (500ms window, 1-6yd guaranteed, no INT, CHECKDOWN! flash, _checkdownFired)
+- P68: Red Zone Fade to Corner (FADE ROUTE 3rd/4th &5+ inside 25, LOFT IT!, 48%/18%/34%, _fadePlaying)
+- Build clean; committed; context updated
+
+---
+
 ## 2026-03-20
 
 - Session: P1–P5 implementation

@@ -4,7 +4,7 @@
 
 - Date: 2026-03-25
 - Overall status: Live on GitHub Pages, active development
-- Current version: P43 — full backlog complete (paired with gridiron-gm v6.1)
+- Current version: P68 — full backlog complete (paired with gridiron-gm v9.0)
 
 ## What exists
 
@@ -73,6 +73,14 @@
 - **P41: Drive Momentum Meter** — `_momentum` HUD bar; ±comp modifier per play
 - **P42: Challenge Flag** — `_challengeUsed`; `_prePlayState` snapshot; 45% overturn
 - **P43: 4th Quarter Comeback Mode** — `_comebackMode`; trailing 7+ Q4; comp bonus; banner
+
+## P64–P68 additions
+
+- **P64: No-Huddle Hurry-Up** — HURRY UP after incomplete; 15s saved; -5% comp next play; `_hurryUpActive/_hurryUpPenalty`
+- **P65: Receiver Route Tree** — CURL/POST/CORNER/GO pre-snap selector; 3s auto-CURL; `_routeChoice {compMod,yardMod}`
+- **P66: Defensive Pass Rush Lane** — INSIDE/OUTSIDE on AI passes; sack%/coverage% modifiers; `_rushLane`
+- **P67: QB Checkdown Under Pressure** — 500ms window; 1-6yd guaranteed gain; no INT; CHECKDOWN! flash; `_checkdownFired`
+- **P68: Red Zone Fade to Corner** — FADE ROUTE 3rd/4th &5+ inside 25; LOFT IT!; 48% catch / 18% INT / 34% inc; TD if in endzone; `_fadePlaying`
 
 ## Next 3 moves
 
