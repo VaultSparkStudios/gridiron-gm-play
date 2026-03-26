@@ -91,31 +91,35 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
-    // Weather badge
-    const wxLabel = { clear:'☀️ CLEAR', rain:'🌧️ RAIN', snow:'❄️ SNOW' }[state.weather];
-    const wxClr   = { clear:'#f59e0b',  rain:'#3b82f6',  snow:'#93c5fd'  }[state.weather];
-    this.add.text(W/2, H/2 + 82, wxLabel, {
-      fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:wxClr, letterSpacing:3
-    }).setOrigin(0.5);
-
     // Rival intro card
     if (state.isRival) {
       const rivBg = this.add.rectangle(W/2, H/2 + 64, W-24, 24, 0xf97316, 0.15).setStrokeStyle(1, 0xf97316, 0.7);
       this.add.text(W/2, H/2 + 64, '🔥 RIVALRY GAME', {
         fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#f97316', letterSpacing:3
       }).setOrigin(0.5);
-      // Pulse the badge
       this.tweens.add({ targets: rivBg, alpha: 0.06, duration: 700, yoyo: true, repeat: -1 });
     }
 
-    // Streak badge
+    // Streak badge — offset avoids rivalry card (rival: 80, no rival: 64)
     if (Math.abs(state.streak) >= 2) {
       const sCol = state.streak > 0 ? '#22c55e' : '#ef4444';
       const sLbl = state.streak > 0 ? `🔥 W${state.streak} STREAK` : `❄️ L${Math.abs(state.streak)} STREAK`;
-      this.add.text(W/2, H/2 + (state.isRival ? 82 : 64), sLbl, {
+      this.add.text(W/2, H/2 + (state.isRival ? 80 : 64), sLbl, {
         fontSize:'8px', fontFamily:'monospace', fontStyle:'bold', color: sCol, letterSpacing:2
       }).setOrigin(0.5);
     }
+
+    // Weather badge — fixed at H/2+92 so streak/rival badges never overlap
+    const wxLabel = { clear:'☀️ CLEAR', rain:'🌧️ RAIN', snow:'❄️ SNOW' }[state.weather];
+    const wxClr   = { clear:'#f59e0b',  rain:'#3b82f6',  snow:'#93c5fd'  }[state.weather];
+    this.add.text(W/2, H/2 + 92, wxLabel, {
+      fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:wxClr, letterSpacing:3
+    }).setOrigin(0.5);
+
+    // Difficulty badge (I25/I46)
+    const _dLabel = { rookie:'CASUAL', normal:'STANDARD', veteran:'VETERAN', hof:'HARDCORE', casual:'CASUAL', standard:'STANDARD', hardcore:'HARDCORE' }[state.difficulty]||'STANDARD';
+    const _dClr   = { casual:'#22c55e', rookie:'#22c55e', standard:'#3b82f6', normal:'#3b82f6', veteran:'#f59e0b', hardcore:'#ef4444', hof:'#ef4444' }[state.difficulty]||'#3b82f6';
+    this.add.text(W - 10, 10, `${_dLabel}`, { fontSize:'7px', fontFamily:'monospace', fontStyle:'bold', color:_dClr, letterSpacing:2 }).setOrigin(1,0);
 
     // Kick Off button
     const btn = this.add.rectangle(W/2, H/2 + 100, 210, 46, 0x22c55e).setInteractive({ useHandCursor:true });
