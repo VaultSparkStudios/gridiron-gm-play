@@ -83,6 +83,16 @@ export class HudScene extends Phaser.Scene {
     // Keep scoreTxt alias for backward compat
     this.scoreTxt=this.scoreTxtT;
 
+    // ── INNO I36: DRIVE CHART TIMELINE ────────────────────────────────────
+    // Horizontal bar at bottom of HUD showing each play as a colored segment
+    // green=gain, red=loss/turnover, gold=TD/FG
+    this._driveSegs = [];          // array of { yards, type } per current drive
+    this._driveGfx = this.add.graphics().setDepth(19);
+    this._driveYLbl = this.add.text(4, HH+12, '', {
+      fontSize:'7px', fontFamily:'monospace', color:'#334155'
+    }).setOrigin(0,0).setDepth(19);
+    this._drawDriveChart();
+
     // ── EVENT LISTENERS ────────────────────────────────────────────────────
     const field=this.scene.get('Field');
     if(field){
@@ -138,6 +148,12 @@ export class HudScene extends Phaser.Scene {
       const pBar = this.add.rectangle(_isOppScore ? this.scale.width-3 : 3, 26, 5, 44, pulseClr, 1).setDepth(25);
       this.tweens.add({ targets:pBar, alpha:0, duration:600, onComplete:()=>pBar.destroy() });
     }
+    // INNO I36: append play to drive chart
+    if(state.possession==='team'){
+      const _type = result.td?'td':result.turnover?'to':result.yards>0?'gain':'loss';
+      this._driveSegs.push({yards:result.yards||0, type:_type});
+      this._drawDriveChart();
+    }
   }
 
   _onPossessionChange(poss) {
@@ -149,6 +165,9 @@ export class HudScene extends Phaser.Scene {
       this.possBanner.setText('✅ YOUR BALL').setColor(C.gn).setAlpha(1);
       this.tweens.add({targets:this.possBanner,alpha:0,duration:1400,delay:800});
     }
+    // INNO I36: reset drive chart on possession change
+    this._driveSegs = [];
+    this._drawDriveChart();
     this._updateYdBar();
   }
 
@@ -170,5 +189,39 @@ export class HudScene extends Phaser.Scene {
     const pct=Math.max(0,Math.min(1,(10-toGo)/10));
     const col=toGo<=3?0xf59e0b:0x22c55e;
     this._ydBar.setDisplaySize(Math.max(2,(W-4)*pct),5).setFillStyle(col);
+  }
+
+  // INNO I36: draw drive chart — horizontal bar of per-play colored segments
+  _drawDriveChart() {
+    if(!this._driveGfx) return;
+    const W=this.scale.width;
+    const HH=52;
+    const barY=HH+12, barH=4;
+    const maxSegs=16; // max segments shown before scrolling off left
+    const segs=this._driveSegs.slice(-maxSegs);
+    const segW=Math.floor((W-8)/Math.max(1,maxSegs));
+    this._driveGfx.clear();
+    if(!segs.length){
+      this._driveYLbl?.setText('');
+      return;
+    }
+    // Background track
+    this._driveGfx.fillStyle(0x0f172a,0.70);
+    this._driveGfx.fillRect(4, barY-1, W-8, barH+2);
+    segs.forEach((seg,i)=>{
+      const x=4+i*segW;
+      const col = seg.type==='td'?0xf59e0b : seg.type==='to'?0xef4444 : seg.yards>0?0x22c55e : 0x475569;
+      this._driveGfx.fillStyle(col,0.85);
+      this._driveGfx.fillRect(x+1, barY, segW-2, barH);
+    });
+    // Tick marks every 4 segs
+    this._driveGfx.lineStyle(1,0x1e3a5f,0.6);
+    for(let t=4;t<segs.length;t+=4){
+      const tx=4+t*segW;
+      this._driveGfx.lineBetween(tx, barY-1, tx, barY+barH+1);
+    }
+    // Label: total yards this drive
+    const _totalYds=segs.reduce((s,g)=>s+Math.max(0,g.yards),0);
+    this._driveYLbl?.setText(`${_totalYds}yd`);
   }
 }
