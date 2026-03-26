@@ -1,28 +1,73 @@
-# Closeout Protocol — Gridiron GM Play
+# Closeout Protocol
 
-Run this at the end of every meaningful session.
+Use this when the user says only `closeout`.
 
-## Steps
+## Required write-back
 
-1. Update `context/CURRENT_STATE.md` — snapshot current feature set and status
-2. Update `context/TASK_BOARD.md` — move completed items to Done, update backlog
-3. Append to `context/DECISIONS.md` — record any new architectural decisions
-4. Update `context/LATEST_HANDOFF.md` — what was done, mid-flight, and next moves
-5. Append to `logs/WORK_LOG.md` — date + what changed + current state
-6. Commit and push both repos if bridge contract changed
-7. Update Claude memory files if running in Claude Code session
+If meaningful work happened, update in this order:
 
-## Closeout checklist
+1. `context/CURRENT_STATE.md`
+2. `context/TASK_BOARD.md`
+3. `context/LATEST_HANDOFF.md`
+4. `logs/WORK_LOG.md`
+5. `context/DECISIONS.md` — when reasoning changed
+6. `context/SELF_IMPROVEMENT_LOOP.md` — MANDATORY (see below)
+7. `docs/CREATIVE_DIRECTION_RECORD.md` — MANDATORY if human gave any creative direction this session
+8. Any project-type or repo-specific files whose truth changed
 
-- [ ] `context/CURRENT_STATE.md` updated with current version and feature list
-- [ ] `context/TASK_BOARD.md` tasks moved correctly
-- [ ] `context/DECISIONS.md` new entries added for any non-obvious choices
-- [ ] `context/LATEST_HANDOFF.md` ready for cold-start next session
-- [ ] `logs/WORK_LOG.md` new entry appended
-- [ ] Bridge contract unchanged OR both repos updated in tandem
-- [ ] Build passes (`npm run build`)
-- [ ] Pushed to GitHub
+## Self-Improvement Loop — closeout (mandatory)
 
-## Bridge contract reminder
+Append a new entry to `context/SELF_IMPROVEMENT_LOOP.md`:
 
-If you changed `gm_roster_export` or `gm_game_result` payloads, verify the corresponding change is in `gridiron-gm`'s `exportGameToPlay()` and `importPlayResult()` before closing out.
+### Step 1 — Score
+
+Rate each category 0–10:
+
+| Category | Score | vs Last | Notes |
+|---|---|---|---|
+| Dev Health | | | code quality, CI, debt |
+| Creative Alignment | | | adherence to SOUL.md + CDR |
+| Momentum | | | velocity, milestone progress |
+| Engagement | | | community / user signals |
+| Process Quality | | | handoff freshness, Studio OS compliance |
+| **Total** | **/ 50** | | |
+
+### Step 2 — Reflect
+
+- **Top win this session:**
+- **Top gap this session:**
+
+### Step 3 — Brainstorm
+
+Generate 3–5 innovative solutions, features, or improvements. Push past the obvious. Consider:
+- What would make this 10x more engaging?
+- What's the one thing players/users keep asking for?
+- What technical debt is silently costing velocity?
+- What creative direction has drifted from the SOUL?
+- What competitive move would surprise and delight?
+
+### Step 4 — Commit
+
+Pick 1–2 brainstorm items. Add them to `context/TASK_BOARD.md` labeled `[SIL]`.
+
+## Creative Direction Record — closeout check
+
+Review the session. Did the human give any:
+- Creative direction (features, feel, scope)?
+- Feature assignments or explicit goals?
+- Brand, tone, visual, or quality guidance?
+- Any "do this / don't do this"?
+
+If yes → append to `docs/CREATIVE_DIRECTION_RECORD.md` (ADDITIVE ONLY, never edit existing entries).
+
+## Required closeout output
+
+Reply with a concise `Session Closeout` containing:
+
+1. What was completed
+2. Files changed
+3. Validation status
+4. Self-Improvement Loop summary (scores, top win, top gap, brainstorm highlights, committed items)
+5. Open problems
+6. Recommended next action
+7. Exact files the next agent should read first
