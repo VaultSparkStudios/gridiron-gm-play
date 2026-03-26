@@ -42,10 +42,24 @@ export class PlayCallScene extends Phaser.Scene {
     this.add.text(px - 96, startY - 12, '🦶 RUN',  { fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#f59e0b' }).setOrigin(0.5,0).setDepth(32);
     this.add.text(px + 96, startY - 12, '🏈 PASS', { fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#3b82f6' }).setOrigin(0.5,0).setDepth(32);
 
+    // P1: situational play highlights based on down & distance
+    const _d=state.down, _t=state.toGo;
+    const hlMap={
+      run_inside:  (_d<=2&&_t<=3),
+      run_outside: (_d===1&&_t>=5),
+      run_draw:    (_d===2&&_t>=6),
+      scramble:    (_d===3&&_t<=4),
+      pass_quick:  (_d>=3&&_t<=6)||(_d===2&&_t<=8),
+      pass_medium: (_d===2&&_t>=5&&_t<=10)||(_d===3&&_t>=5&&_t<=10),
+      pass_deep:   (_d===1&&_t>=10)||(_d===3&&_t>=12),
+      pass_action: (_d<=2&&_t>=4),
+      screen_pass: (_d===3&&_t>=7&&_t<=14),
+      sideline_route:(_d===3&&_t>=3&&state.quarter>=4),
+    };
     const runs   = CALLS.filter(c=>c.cat==='run');
     const passes = CALLS.filter(c=>c.cat==='pass');
-    runs.forEach((c,i)   => this._makeBtn(c, px - 96, startY + i * (btnH+5), btnW, btnH, '#f59e0b'));
-    passes.forEach((c,i) => this._makeBtn(c, px + 96, startY + i * (btnH+5), btnW, btnH, '#3b82f6'));
+    runs.forEach((c,i)   => this._makeBtn(c, px - 96, startY + i * (btnH+5), btnW, btnH, '#f59e0b', !!hlMap[c.id]));
+    passes.forEach((c,i) => this._makeBtn(c, px + 96, startY + i * (btnH+5), btnW, btnH, '#3b82f6', !!hlMap[c.id]));
   }
 
   _show4thDown() {
@@ -97,17 +111,20 @@ export class PlayCallScene extends Phaser.Scene {
     bg.on('pointerdown', cb);
   }
 
-  _makeBtn(call, cx, cy, w, h, accentHex) {
+  _makeBtn(call, cx, cy, w, h, accentHex, highlight=false) {
     const accent = Phaser.Display.Color.HexStringToColor(accentHex).color;
-    const bg = this.add.rectangle(cx, cy, w, h, 0x1a2438, 1)
-      .setDepth(32).setStrokeStyle(1, accent, 0.35).setInteractive({ useHandCursor: true });
+    const bgBase = highlight ? 0x0f2218 : 0x1a2438;
+    const bg = this.add.rectangle(cx, cy, w, h, bgBase, 1)
+      .setDepth(32).setStrokeStyle(highlight?2:1, accent, highlight?0.80:0.35).setInteractive({ useHandCursor: true });
     const label = this.add.text(cx, cy - 8, call.label,
-      { fontSize:'11px', fontFamily:'monospace', fontStyle:'bold', color:'#e2e8f0' }).setOrigin(0.5).setDepth(33);
+      { fontSize:'11px', fontFamily:'monospace', fontStyle:'bold', color: highlight?accentHex:'#e2e8f0' }).setOrigin(0.5).setDepth(33);
     const tip = this.add.text(cx, cy + 9, call.tip,
       { fontSize:'8px', fontFamily:'monospace', color:'#475569' }).setOrigin(0.5).setDepth(33);
+    // P1: situational badge
+    if(highlight)this.add.text(cx+w/2-6,cy-h/2+3,'★',{fontSize:'8px',fontFamily:'monospace',color:accentHex}).setOrigin(1,0).setDepth(34);
 
-    bg.on('pointerover', ()=>{ bg.setFillStyle(accent, 0.18); label.setColor(accentHex); tip.setColor('#94a3b8'); });
-    bg.on('pointerout',  ()=>{ bg.setFillStyle(0x1a2438, 1);  label.setColor('#e2e8f0'); tip.setColor('#475569'); });
+    bg.on('pointerover', ()=>{ bg.setFillStyle(accent, 0.22); label.setColor(accentHex); tip.setColor('#94a3b8'); });
+    bg.on('pointerout',  ()=>{ bg.setFillStyle(bgBase, 1);    label.setColor(highlight?accentHex:'#e2e8f0'); tip.setColor('#475569'); });
     bg.on('pointerdown', ()=>this._select(call.id));
   }
 

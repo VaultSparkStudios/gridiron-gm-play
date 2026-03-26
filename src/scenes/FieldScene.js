@@ -76,6 +76,9 @@ export class FieldScene extends Phaser.Scene {
     this._thirdDownAtt = 0; this._thirdDownConv = 0; this._thirdHUD = null; this._thirdHUDTxt = null;
     // P74-P78 flags
     this._bumpCovEls = []; this._slideEls = []; this._rzRunEls = []; this._penaltyEls = []; this._twoMinFired1 = false; this._twoMinFired2 = false;
+    // V3: speed trail graphics
+    this._trailGfx = this.add.graphics().setDepth(3);
+    this._trailPts = [];
     this.events.on('playCalled', this._onPlayCalled, this);
     this._resetFormation();
     this._startWeather();
@@ -130,6 +133,11 @@ export class FieldScene extends Phaser.Scene {
     g.fillStyle(0x0f3d20);
     g.fillRect(0, FIELD_Y, FIELD_LEFT, FIELD_H);
     g.fillRect(FIELD_RIGHT, FIELD_Y, 100, FIELD_H);
+    // E1: team-colored endzone overlays using GM bridge colors
+    const _ezTc=Phaser.Display.Color.HexStringToColor(state.team?.clr||'#22c55e').color;
+    const _ezOc=Phaser.Display.Color.HexStringToColor(state.opponent?.clr||'#ef4444').color;
+    this.add.rectangle(50,FIELD_Y+FIELD_H/2,FIELD_LEFT,FIELD_H,_ezTc,0.22).setDepth(0);
+    this.add.rectangle(750,FIELD_Y+FIELD_H/2,100,FIELD_H,_ezOc,0.22).setDepth(0);
     this.add.text(50,  FIELD_Y + FIELD_H/2, 'END\nZONE', { fontSize:'11px', fontFamily:'monospace', color:'#166534', align:'center' }).setOrigin(0.5);
     this.add.text(750, FIELD_Y + FIELD_H/2, 'END\nZONE', { fontSize:'11px', fontFamily:'monospace', color:'#166534', align:'center' }).setOrigin(0.5);
     for (let y = 10; y <= 90; y += 10) {
@@ -155,36 +163,52 @@ export class FieldScene extends Phaser.Scene {
   _createPlayers() {
     const tc = Phaser.Display.Color.HexStringToColor(state.team?.clr     || '#22c55e').color;
     const oc = Phaser.Display.Color.HexStringToColor(state.opponent?.clr || '#ef4444').color;
-    this.qb  = this._dot(tc, 'QB',  14);  this.rb  = this._dot(tc, 'RB',  13);
-    this.wr1 = this._dot(tc, 'WR',  10);  this.wr2 = this._dot(tc, 'WR',  10);
-    this.te  = this._dot(tc, 'TE',  12);
-    this.lt  = this._dot(tc, 'LT',  13);  this.lg  = this._dot(tc, 'LG',  13);
-    this.c   = this._dot(tc, 'C',   13);  this.rg  = this._dot(tc, 'RG',  13);
-    this.rt  = this._dot(tc, 'RT',  13);
-    this.oLine = [this.lt, this.lg, this.c, this.rg, this.rt];
-    this.offPlayers = [this.qb, this.rb, this.wr1, this.wr2, this.te, ...this.oLine];
-    this.dl  = this._dot(oc, 'DE',  14);  this.dl2 = this._dot(oc, 'DT',  14);
-    this.lb  = this._dot(oc, 'MLB', 12);  this.lb2 = this._dot(oc, 'OLB', 12);
-    this.cb1 = this._dot(oc, 'CB',  10);  this.cb2 = this._dot(oc, 'CB',  10);
-    this.saf = this._dot(oc, 'FS',  11);
-    this.defPlayers = [this.dl, this.dl2, this.lb, this.lb2, this.cb1, this.cb2, this.saf];
-    this.recTargets = [];
+    const tp = state.team?.players||[], op = state.opponent?.players||[];
+    // V1: radius from attributes — high STR = bigger dot, high SPD = slightly smaller
+    const _pxR = p => { if(!p)return 12; const s=p.str||70,v=p.spd||75; return clamp(Math.round(12+(s-70)/9-(v>82?1:0)),9,16); };
+    const qbP=tp.find(p=>p.pos==='QB'), rbP=tp.find(p=>p.pos==='RB');
+    const wr1P=tp.find(p=>p.pos==='WR'), wr2P=tp.filter(p=>p.pos==='WR')[1];
+    const teP=tp.find(p=>p.pos==='TE');
+    const ltP=tp.find(p=>p.pos==='LT'), lgP=tp.find(p=>p.pos==='LG'), cP=tp.find(p=>p.pos==='C');
+    const rgP=tp.find(p=>p.pos==='RG'), rtP=tp.find(p=>p.pos==='RT');
+    this.qb =this._dot(tc,'QB', _pxR(qbP),  qbP?.ovr);  this.rb =this._dot(tc,'RB', _pxR(rbP),  rbP?.ovr);
+    this.wr1=this._dot(tc,'WR', _pxR(wr1P), wr1P?.ovr); this.wr2=this._dot(tc,'WR', _pxR(wr2P), wr2P?.ovr);
+    this.te =this._dot(tc,'TE', _pxR(teP),  teP?.ovr);
+    this.lt =this._dot(tc,'LT', _pxR(ltP),  ltP?.ovr);  this.lg =this._dot(tc,'LG', _pxR(lgP),  lgP?.ovr);
+    this.c  =this._dot(tc,'C',  _pxR(cP),   cP?.ovr);   this.rg =this._dot(tc,'RG', _pxR(rgP),  rgP?.ovr);
+    this.rt =this._dot(tc,'RT', _pxR(rtP),  rtP?.ovr);
+    this.oLine=[this.lt,this.lg,this.c,this.rg,this.rt];
+    this.offPlayers=[this.qb,this.rb,this.wr1,this.wr2,this.te,...this.oLine];
+    const dlP=op.find(p=>['DE','DL'].includes(p.pos)), dl2P=op.filter(p=>['DE','DL','DT'].includes(p.pos))[1];
+    const lbP=op.find(p=>['MLB','LB'].includes(p.pos)), lb2P=op.filter(p=>['OLB','LB'].includes(p.pos))[0];
+    const cb1P=op.find(p=>p.pos==='CB'), cb2P=op.filter(p=>p.pos==='CB')[1];
+    const safP=op.find(p=>['S','FS','SS'].includes(p.pos));
+    this.dl =this._dot(oc,'DE', _pxR(dlP),  dlP?.ovr);  this.dl2=this._dot(oc,'DT', _pxR(dl2P), dl2P?.ovr);
+    this.lb =this._dot(oc,'MLB',_pxR(lbP),  lbP?.ovr);  this.lb2=this._dot(oc,'OLB',_pxR(lb2P), lb2P?.ovr);
+    this.cb1=this._dot(oc,'CB', _pxR(cb1P), cb1P?.ovr); this.cb2=this._dot(oc,'CB', _pxR(cb2P), cb2P?.ovr);
+    this.saf=this._dot(oc,'FS', _pxR(safP), safP?.ovr);
+    this.defPlayers=[this.dl,this.dl2,this.lb,this.lb2,this.cb1,this.cb2,this.saf];
+    this.recTargets=[];
     // Kickoff return blockers (P18)
-    this.blk1 = this._dot(tc, 'BLK', 10); this.blk2 = this._dot(tc, 'BLK', 10); this.blk3 = this._dot(tc, 'BLK', 10);
-    this.kickBlocks = [this.blk1, this.blk2, this.blk3];
-    this.kickBlocks.forEach(b => this._show(b, false));
-    this._engagedCvg = new Set();
+    this.blk1=this._dot(tc,'BLK',10); this.blk2=this._dot(tc,'BLK',10); this.blk3=this._dot(tc,'BLK',10);
+    this.kickBlocks=[this.blk1,this.blk2,this.blk3];
+    this.kickBlocks.forEach(b=>this._show(b,false));
+    this._engagedCvg=new Set();
     // P19: Punt return blockers (opponent team color)
-    const oc2 = Phaser.Display.Color.HexStringToColor(state.opponent?.clr || '#ef4444').color;
-    this.puntBlk1 = this._dot(oc2,'BLK',10); this.puntBlk2 = this._dot(oc2,'BLK',10);
-    this.puntBlocks = [this.puntBlk1, this.puntBlk2];
+    const oc2=Phaser.Display.Color.HexStringToColor(state.opponent?.clr||'#ef4444').color;
+    this.puntBlk1=this._dot(oc2,'BLK',10); this.puntBlk2=this._dot(oc2,'BLK',10);
+    this.puntBlocks=[this.puntBlk1,this.puntBlk2];
     this.puntBlocks.forEach(b=>this._show(b,false));
   }
 
-  _dot(color, label, radius) {
+  _dot(color, label, radius, ovr) {
     const g = this.add.graphics();
     g.fillStyle(color, 1); g.fillCircle(0, 0, radius);
-    g.lineStyle(2, 0xffffff, 0.35); g.strokeCircle(0, 0, radius);
+    // V2: glow ring alpha scales with OVR — elite players glow brighter
+    const ga = ovr ? Math.min(0.9, 0.15+(ovr-60)*0.015) : 0.35;
+    g.lineStyle(2, 0xffffff, ga); g.strokeCircle(0, 0, radius);
+    // V2: gold outer ring for elite players (OVR 85+)
+    if(ovr&&ovr>=85){ g.lineStyle(1.5,0xfbbf24,0.65); g.strokeCircle(0,0,radius+3); }
     const lbl = this.add.text(0, 0, label, { fontSize:'7px', fontFamily:'monospace', color:'#fff', fontStyle:'bold' }).setOrigin(0.5).setDepth(5);
     g._lbl = lbl; g._r = radius; g._origLabel = label;
     g.setDepth(4);
@@ -194,6 +218,12 @@ export class FieldScene extends Phaser.Scene {
   _place(d, x, y) { d.x = x; d.y = y; if (d._lbl) { d._lbl.x = x; d._lbl.y = y; } }
   _show(d, vis)   { d.setVisible(vis); if (d._lbl) d._lbl.setVisible(vis); }
   _syncLbl(d)     { if (d._lbl) { d._lbl.x = d.x; d._lbl.y = d.y; } }
+  // V12: flash ball carrier / receiver last name above their dot
+  _flashCarrierName(dot, name) {
+    if(!dot||!name)return;
+    const t=this.add.text(dot.x,dot.y-26,name,{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#f1f5f9',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(15);
+    this.tweens.add({targets:t,alpha:0,y:t.y-20,duration:900,ease:'Quad.easeOut',onComplete:()=>t?.destroy()});
+  }
 
   // ─── INPUT + D-PAD ────────────────────────────────────────────────────────
 
@@ -603,6 +633,8 @@ export class FieldScene extends Phaser.Scene {
     // Tuned: runner 72-90 px/s, QB scramble slightly slower
     this.runSpd = pxs(pData.spd, isScramble ? 58 : 72, 0.95) + (isOutside ? 8 : 0) + (isDraw ? 6 : 0);
     this.ball.x = this.runner.x; this.ball.y = this.runner.y;
+    // V12: flash runner name at handoff
+    this._flashCarrierName(this.runner, pData.name?.split(' ').pop()||(isScramble?'QB':'RB'));
 
     if (isDraw) {
       this.phase = 'run_draw_fake';
@@ -614,6 +646,8 @@ export class FieldScene extends Phaser.Scene {
       this.phase = 'run';
     }
 
+    // G7: OL surge animation — linemen burst forward at snap
+    this.oLine.forEach(ol=>{ if(!ol.visible)return; this.tweens.add({targets:ol,x:ol.x+18,duration:180,ease:'Quad.easeOut',yoyo:true,onUpdate:()=>this._syncLbl(ol)}); });
     this._startOLBlocker();
 
     const dc = state.opponent?.dcScheme || '4-3';
@@ -723,6 +757,8 @@ export class FieldScene extends Phaser.Scene {
 
   _tackled() {
     if (this.phase !== 'run') return;
+    // V3: clear speed trail on tackle
+    this._trailPts=[]; this._trailGfx?.clear();
     Sound.tackle();
     if (this._jukeCDBar) { this._jukeCDBar.destroy(); this._jukeCDBar = null; }
     this.kickBlocks?.forEach(b => this._show(b, false));
@@ -1037,7 +1073,7 @@ export class FieldScene extends Phaser.Scene {
         .setDepth(8).setInteractive({ useHandCursor:true });
       const icon   = this.add.text(dot.x, dot.y-28, isOpen?'🟢':'🔴', {fontSize:'14px'}).setOrigin(0.5).setDepth(9);
       const nmTxt  = this.add.text(dot.x, dot.y+22, p.name||p.pos, {fontSize:'7px',fontFamily:'monospace',color:'#fff'}).setOrigin(0.5).setDepth(9);
-      zone.on('pointerdown', ()=>{ if(this.phase!=='pass_wait') return; this._lastReceiver=p; this._throwTo(dot, isOpen); });
+      zone.on('pointerdown', ()=>{ if(this.phase!=='pass_wait') return; this._lastReceiver=p; this._flashCarrierName(dot,p.name?.split(' ').pop()||p.pos); this._throwTo(dot, isOpen); });
       zone.on('pointerover', ()=>zone.setAlpha(0.65));
       zone.on('pointerout',  ()=>zone.setAlpha(1));
       if (isOpen) this.tweens.add({ targets:zone, scaleX:1.2, scaleY:1.2, duration:520, yoyo:true, repeat:-1 });
@@ -1231,9 +1267,13 @@ export class FieldScene extends Phaser.Scene {
         this._track(this._lastReceiver.id,'recYds',Math.max(0,yards));
         this._track(this._lastReceiver.id,'rec',1);
         if (td) { this._track(this._lastReceiver.id,'recTD',1); this._track(qb.id,'passTD',1); }
+        // GO2: track POTG
+        if(yards>0&&(!state.bestPlay||yards>(state.bestPlay.yards||0))){state.bestPlay={name:this._lastReceiver.name?.split(' ').pop()||this._lastReceiver.pos,yards,type:td?'REC TD':'REC'};}
       }
       this._lastReceiver = null;
     }
+    // GO2: track POTG for runs
+    if(isRun&&yards>0&&(!state.bestPlay||yards>(state.bestPlay.yards||0))){const _bpr=call==='scramble'?qb:rb;state.bestPlay={name:_bpr.name?.split(' ').pop()||'RB',yards,type:td?'RUSH TD':'RUSH'};}
 
     // P72: track 3rd down conversions
     if(state.down===3&&yards>=(state.toGo||10)){this._thirdDownConv++;this._updateThirdHUD();}
@@ -2265,6 +2305,8 @@ export class FieldScene extends Phaser.Scene {
   update(time, delta) {
     const k = this.keys, dp = this._dpadState;
     const dt = delta / 1000;
+    // V3: clear trail when not actively running
+    if(this.phase!=='run'&&this._trailPts?.length){this._trailPts=[];this._trailGfx?.clear();}
 
     // P45: Show audible button during presnap (user possession) — build once, destroy when not presnap
     if(this.phase==='presnap'&&state.possession==='team'&&!this._audibleUsed){
@@ -2291,6 +2333,13 @@ export class FieldScene extends Phaser.Scene {
         this.runner.y=clamp(this.runner.y,FIELD_Y+10,FIELD_Y+FIELD_H-10);
         this.ball.x=this.runner.x; this.ball.y=this.runner.y;
         this._syncLbl(this.runner);
+        // V3: speed trail for fast runners (SPD > 80)
+        if(this._runnerData?.spd>80){
+          this._trailPts.push({x:this.runner.x,y:this.runner.y});
+          if(this._trailPts.length>7)this._trailPts.shift();
+          this._trailGfx.clear();
+          for(let _ti=1;_ti<this._trailPts.length;_ti++){const _ta=(_ti/this._trailPts.length)*0.5;this._trailGfx.lineStyle(3,0xfbbf24,_ta);this._trailGfx.lineBetween(this._trailPts[_ti-1].x,this._trailPts[_ti-1].y,this._trailPts[_ti].x,this._trailPts[_ti].y);}
+        }
         if (this.runner.x>=FIELD_RIGHT||this.runner.y<=FIELD_Y||this.runner.y>=FIELD_Y+FIELD_H) { this._tackled(); return; }
       }
       this.jukeCD-=delta;

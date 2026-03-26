@@ -40,6 +40,9 @@ export const state = {
 
   // GM bridge — set from gm_roster_export so exportStats can write it back
   gameId: null,
+
+  // GO2: best single play of the game {name, yards, type}
+  bestPlay: null,
 };
 
 export function resetState() {
@@ -62,6 +65,7 @@ export function resetState() {
   state.injuries = [];
   state.weather = 'clear';
   state.gameId = null;
+  state.bestPlay = null;
   state._halfShown = false;
   state._twoMin1 = false;
   state._twoMin2 = false;

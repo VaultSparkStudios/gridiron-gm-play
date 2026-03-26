@@ -32,6 +32,11 @@ export class HudScene extends Phaser.Scene {
       fontSize:'10px', fontFamily:'monospace', color:C.mt
     }).setOrigin(1, 0).setDepth(21);
 
+    // H3: first-down progress bar — thin strip below HUD, fills as yards gained toward 1st down
+    this._ydBarBg = this.add.rectangle(W/2, 46, W, 5, 0x1e293b, 0.9).setDepth(20);
+    this._ydBar   = this.add.rectangle(2, 46, 2, 5, 0x22c55e, 1).setDepth(21).setOrigin(0, 0.5);
+    this._updateYdBar();
+
     // Possession banner (just below HUD bar)
     this.possBanner = this.add.text(W/2, 50, '', {
       fontSize:'10px', fontFamily:'monospace', fontStyle:'bold', color:C.gn
@@ -83,6 +88,9 @@ export class HudScene extends Phaser.Scene {
     this.resultTxt.setText(result.text).setColor(col).setAlpha(1);
     this.tweens.add({ targets:this.resultTxt, alpha:0, duration:1400, delay:600 });
     this._onPhaseChange('presnap');
+    this._updateYdBar();
+    // Score pop on TD or FG
+    if(result.td||result.text?.includes('FG GOOD')){this.tweens.add({targets:this.scoreTxt,scaleX:1.5,scaleY:1.5,duration:160,yoyo:true,ease:'Bounce.easeOut'});}
   }
 
   _onPossessionChange(poss) {
@@ -94,6 +102,7 @@ export class HudScene extends Phaser.Scene {
       this.possBanner.setText('✅ YOUR BALL').setColor(C.gn).setAlpha(1);
       this.tweens.add({ targets:this.possBanner, alpha:0, duration:1400, delay:800 });
     }
+    this._updateYdBar();
   }
 
   _refresh() {
@@ -101,5 +110,17 @@ export class HudScene extends Phaser.Scene {
     this.downTxt.setText(this._downStr());
     this.qtrTxt.setText(`Q${state.quarter}`);
     this.phaseTxt.setText('⏸ PRE-SNAP').setColor(C.mt);
+    this._updateYdBar();
+  }
+
+  // H3: yards-to-go progress bar — fills as you gain yards toward the 1st down marker
+  _updateYdBar() {
+    if(!this._ydBar)return;
+    const W=this.scale.width;
+    if(state.possession!=='team'){this._ydBar.setDisplaySize(0,5);return;}
+    const toGo=state.toGo||10;
+    const pct=Math.max(0,Math.min(1,(10-toGo)/10));
+    const col=toGo<=3?0xf59e0b:0x22c55e;
+    this._ydBar.setDisplaySize(Math.max(2,(W-4)*pct),5).setFillStyle(col);
   }
 }
