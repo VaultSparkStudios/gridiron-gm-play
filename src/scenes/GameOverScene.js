@@ -30,6 +30,14 @@ export class GameOverScene extends Phaser.Scene {
       fontSize:'22px', fontFamily:'monospace', fontStyle:'bold', color:'#f1f5f9'
     }).setOrigin(0.5);
 
+    // P125: OT defeat card — special overlay for overtime losses
+    if(!won&&state._isOT){
+      const _otBg=this.add.rectangle(W/2,H/2,W,H,0x1a0a00,0.7).setDepth(5);
+      this.add.text(W/2,H/2-60,'⏱ OT DEFEAT',{fontSize:'28px',fontFamily:'monospace',fontStyle:'bold',color:'#f97316',stroke:'#000',strokeThickness:5}).setOrigin(0.5).setDepth(6);
+      this.add.text(W/2,H/2-30,'Came to overtime... but couldn\'t finish it.',{fontSize:'11px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(6);
+      this.add.text(W/2,H/2-12,'No shame in leaving it all on the field.',{fontSize:'10px',fontFamily:'monospace',color:'#64748b',fontStyle:'italic'}).setOrigin(0.5).setDepth(6);
+      this.time.delayedCall(2200,()=>{this.tweens.add({targets:_otBg,alpha:0,duration:800});});
+    }
     // Weather & rival badge
     const _badges=[];
     if(state.weather&&state.weather!=='clear')_badges.push({txt:state.weather==='snow'?'❄️ SNOW GAME':state.weather==='rain'?'🌧️ RAIN GAME':'💨 WIND',clr:'#93c5fd'});

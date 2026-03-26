@@ -110,6 +110,10 @@ export class FieldScene extends Phaser.Scene {
     this._aiCallLog = [];
     // INNO I64: defensive pressure ring blitz bonus
     this._blitzPressureBonus = 0;
+    // v27: I27/I33/I34/I35/I37/I38/P120-P125 flags
+    this._fieldPosPenalty = false; this._freshDlUsed = false; this._freshDlH1 = 0; this._freshDlH2 = 0;
+    this._doubleMoveActive = false; this._doubleMoveBtn = null; this._doubleMoveMod = 0;
+    this._shuffleEls = null; this._shuffleUsedBonus = 0; this._persFoulChecked = false;
     this._crowdNoise = false; this._pressureBar = null;
     // Tendency tracker: rolling window of last 6 calls ('run'|'pass') for AI counter-calling
     this._callHistory = [];
@@ -1080,6 +1084,26 @@ export class FieldScene extends Phaser.Scene {
         });
       });
     }
+    // P121: Pocket shuffle step — sidestep +8% completion chance, destroys once used
+    if(state.possession==='team'){
+      this.time.delayedCall(600,()=>{
+        if(this.phase!=='pass_wait')return;
+        const _sbtn=this.add.text(this.qb.x-34,this.qb.y+28,'↔ SHUFFLE',{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',backgroundColor:'#0f766e',padding:{x:3,y:2}}).setOrigin(0.5).setDepth(20).setInteractive({useHandCursor:true});
+        this._shuffleEls=_sbtn;
+        _sbtn.on('pointerdown',()=>{if(this.phase!=='pass_wait')return;const _x=this.qb.x+(Math.random()<0.5?-8:8);this.qb.setX(clamp(_x,FIELD_LEFT+8,FIELD_RIGHT-8));_sbtn.setStyle({backgroundColor:'#134e4a'});_sbtn.setAlpha(0.5);_sbtn.disableInteractive();this._shuffleUsedBonus=0.08;});
+        this.time.delayedCall(2600,()=>_sbtn?.destroy?.());
+      });
+    }
+    // P123: WR double move SHAKE! — +15% comp on covered deep pass
+    if(state.possession==='team'&&!this._doubleMoveActive){
+      this.time.delayedCall(800,()=>{
+        if(this.phase!=='pass_wait')return;
+        const _db=this.add.text(this.qb.x+34,this.qb.y+28,'SHAKE!',{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24',backgroundColor:'#78350f',padding:{x:3,y:2}}).setOrigin(0.5).setDepth(20).setInteractive({useHandCursor:true});
+        this._doubleMoveBtn=_db;
+        _db.on('pointerdown',()=>{if(this.phase!=='pass_wait')return;this._doubleMoveActive=true;this._doubleMoveMod=0.15;_db.setStyle({backgroundColor:'#451a03'});_db.setAlpha(0.5);_db.disableInteractive();});
+        this.time.delayedCall(2200,()=>_db?.destroy?.());
+      });
+    }
   }
 
   // 5-man OL forms protective pocket: LT/LG/C/RG/RT arc in front of QB
@@ -1130,6 +1154,8 @@ export class FieldScene extends Phaser.Scene {
       this.time.delayedCall(beatMs, () => {
         this._pocketBeaten[blockerIdx] = true;
         if (this.phase === 'pass_wait') this.pressureTxt?.setText('PRESSURE!');
+        // INNO I33: pocket collapse tween — OL dot converges 10px toward QB
+        const _bl=this._pocketDots?.[blockerIdx];if(_bl){this.tweens.add({targets:_bl,x:_bl.x+(this.qb.x-_bl.x)*0.25,y:_bl.y+(this.qb.y-_bl.y)*0.25,duration:200,ease:'Quad.easeIn'});}
       });
 
       this.time.delayedCall(rushDelay, () => {
@@ -1549,6 +1575,12 @@ export class FieldScene extends Phaser.Scene {
         if(_qbPerso==='money'&&(this._fatigue[qb.id]||0)>70)compCh=Math.max(0.10,compCh-0.08);
         // B3: crowd noise home field — -5% comp for opponent when crowd upgrade active
         if(this._crowdNoise&&state.possession!=='team')compCh=Math.max(0.05,compCh-0.05);
+        // INNO I38: field position penalty — drives starting yardLine<=10 get -4% comp
+        if(this._fieldPosPenalty)compCh=Math.max(0.08,compCh-0.04);
+        // P121: pocket shuffle step bonus
+        if(this._shuffleUsedBonus){compCh=Math.min(0.92,compCh+this._shuffleUsedBonus);this._shuffleUsedBonus=0;}
+        // P123: WR double move bonus
+        if(this._doubleMoveActive){compCh=Math.min(0.92,compCh+this._doubleMoveMod);this._doubleMoveActive=false;this._doubleMoveMod=0;}
         // G4: jump ball — tap LEAP on a covered deep pass to boost completion via WR jmp
         if(this._jmpBonus){if(type==='covered'&&Math.random()<this._jmpBonus){type='complete';qteBonus=Math.max(qteBonus,0.85);}this._jmpBonus=0;}
         if (type==='covered' && Math.random()<intCh*2) {
@@ -1706,7 +1738,10 @@ export class FieldScene extends Phaser.Scene {
       state.possession='opp'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10;
     } else {
       state.yardLine = Math.min(99, state.yardLine + result.yards);
-      if (result.yards >= state.toGo) { state.down=1; state.toGo=10; this._lastPlayGainedFirstDown=true; }
+      if (result.yards >= state.toGo) { state.down=1; state.toGo=10; this._lastPlayGainedFirstDown=true;
+        // INNO I35: first-down conversion flash — LOS line pulses bright green 400ms
+        const _fdFlash=this.add.graphics().setDepth(28);_fdFlash.lineStyle(4,0x22c55e,0.9);const _fdx=FIELD_LEFT+(state.yardLine/100)*FIELD_W;_fdFlash.lineBetween(_fdx,FIELD_Y,_fdx,FIELD_Y+FIELD_H);this.tweens.add({targets:_fdFlash,alpha:0,duration:400,onComplete:()=>_fdFlash?.destroy?.()});
+      }
       else { state.down++; state.toGo=Math.max(1,state.toGo-result.yards); }
       // P51: offensive holding — repeat the down (undo the increment)
       if(this._p51Hold){this._p51Hold=false;state.down=Math.max(1,state.down-1);state.toGo=Math.min(state.toGo+10,40);}
@@ -1732,6 +1767,8 @@ export class FieldScene extends Phaser.Scene {
     if(state.plays===100){const W=this.scale.width;const m=this.add.text(W/2,FIELD_Y+FIELD_H/2,'🎖️ 100 PLAYS PLAYED!',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(60);this.tweens.add({targets:m,alpha:0,y:m.y-40,delay:800,duration:1200,onComplete:()=>m?.destroy?.()});}
     // P41: momentum drain on turnover
     if(result.turnover) this._updateMomentum(-12);
+    // INNO I27: turnover celebration flash — gold "TURNOVER!" 800ms before ball reset
+    if(result.turnover&&(result.type==='int'||result.type==='fumble')){const W=this.scale.width;const _tf=this.add.text(W/2,FIELD_Y+FIELD_H/2-20,'TURNOVER!',{fontSize:'22px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(55);this.tweens.add({targets:_tf,scaleX:1.3,scaleY:1.3,yoyo:true,duration:220,onComplete:()=>{this.tweens.add({targets:_tf,alpha:0,duration:400,onComplete:()=>_tf?.destroy?.()});}});}
     this.events.emit('playResult', result);
     const hud = this.scene.get('Hud');
     hud?.events?.emit('playResult', result);
@@ -2022,7 +2059,10 @@ export class FieldScene extends Phaser.Scene {
     const _dBase = state.team?.players?.find(p=>p.pos==='QB')||{spd:66};
     this._defSpd = pxs(_dBase.spd, 90, 1.2);
     if (call === 'man')          { this._defSpd *= 1.22; this._aiRunSpeed *= 1.06; }
-    else if (call === 'blitz')   { this._aiRunSpeed *= 1.12; this._launchBlitzPursuer(); }
+    else if (call === 'blitz')   { this._aiRunSpeed *= 1.12; this._launchBlitzPursuer();
+      // INNO I34: blitz telegraph — LB dots nudge 15px forward pre-snap (only if !_defDisguise at call time)
+      if(this._pocketDots?.length){const _bTgt=this._pocketDots.slice(0,2);_bTgt.forEach(d=>{if(!d)return;this.tweens.add({targets:d,y:d.y-15,duration:180,yoyo:true,ease:'Quad.easeOut'});});}
+    }
     else if (call === 'prevent') { this._aiRunSpeed *= 0.84; this._defSpd *= 0.88; }
     // P25: hurry-up overrides pass chance and speeds up AI RB
     // INNO I17: personality modifies AI pass tendency
@@ -2035,6 +2075,8 @@ export class FieldScene extends Phaser.Scene {
     if(this.aiDown===3&&this.aiToGo>=8) passCh=Math.min(0.88,passCh+0.22);
     if(this.aiDown===3&&this.aiToGo<=3) passCh=Math.max(0.10,passCh-0.20);
     if(state.yardLine<=15) passCh=Math.min(0.50,passCh);
+    // INNO I37: AI red zone tendency — at yardLine>=90 run at 65%+ rate
+    if(state.yardLine>=90) passCh=Math.max(0.08,passCh-0.25);
     // INNO I61: AI no-repeat — prevent 3 consecutive same play type
     const _aiLast3=(this._aiCallLog||[]).slice(-3);
     const _allRun=_aiLast3.length>=3&&_aiLast3.every(t=>t==='run');
@@ -2274,6 +2316,14 @@ export class FieldScene extends Phaser.Scene {
     const _dgTx=this.add.text(px,_dgy,'🎭 DISGUISE COVERAGE — AI can\'t read your call',{fontSize:'8px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(38);
     _dgBg.on('pointerdown',()=>{_disguiseOn=!_disguiseOn;this._defDisguise=_disguiseOn;_dgBg.setFillStyle(_disguiseOn?0x3b0764:0x0d1020);_dgTx.setColor(_disguiseOn?'#a78bfa':'#94a3b8');});
     els.push(_dgBg,_dgTx);
+    // P124: Fresh DL sub — once per half, +12% next blitz sack chance
+    const _freshH=state.quarter<=2?'H1':'H2';
+    const _freshUsed=_freshH==='H1'?this._freshDlH1:this._freshDlH2;
+    const _fry=_dgy+36;
+    const _frBg=this.add.rectangle(px,_fry,340,26,_freshUsed?0x0d1020:0x0f2820).setDepth(37).setStrokeStyle(1,_freshUsed?0x1e293b:0x22c55e,0.5).setInteractive({useHandCursor:true});
+    const _frTx=this.add.text(px,_fry,_freshUsed?'🔄 FRESH DL — used this half':'🔄 FRESH DL SUB — +12% sack (once/half)',{fontSize:'8px',fontFamily:'monospace',color:_freshUsed?'#334155':'#86efac'}).setOrigin(0.5).setDepth(38);
+    if(!_freshUsed){_frBg.on('pointerdown',()=>{this._freshDlUsed=true;if(_freshH==='H1')this._freshDlH1=1;else this._freshDlH2=1;this._aiRunSpeed*=1.12;_frBg.setFillStyle(0x0d1020);_frTx.setColor('#334155');this._tdFlash('🔄 FRESH DL — sack bonus active','#22c55e');});}
+    els.push(_frBg,_frTx);
   }
 
   _userTackle() {
@@ -2378,6 +2428,9 @@ export class FieldScene extends Phaser.Scene {
     this._aiDriveYards = (this._aiDriveYards||0) + yardsGiven;
     if (yardsGiven >= this.aiToGo) { this.aiDown=1; this.aiToGo=10; Sound.firstDown(); }
     else { this.aiDown++; this.aiToGo=Math.max(1,this.aiToGo-yardsGiven); }
+    // P122: personal foul — 8% chance on AI run >8yds
+    if(yardsGiven>8&&!this._persFoulChecked&&Math.random()<0.08){this._persFoulChecked=true;const _pfT=this.add.text(this.scale.width/2,FIELD_Y+FIELD_H/2-30,'🚩 PERSONAL FOUL! +15 yds, Auto 1st',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#fde047',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(30);this.time.delayedCall(1600,()=>_pfT?.destroy?.());state.yardLine=Math.max(1,state.yardLine-15);this.aiDown=1;this.aiToGo=10;}
+    else if(yardsGiven<=8){this._persFoulChecked=false;}
     // P59: AI punts from outside FG range on 4th down
     if (this.aiDown===4 && state.yardLine>42 && state.possession==='opp') {
       state.plays++;if(state.plays%8===0)state.quarter=Math.min(4,state.quarter+1);
@@ -2543,6 +2596,8 @@ export class FieldScene extends Phaser.Scene {
     this._audibleMenuShown=false; this._activeAudible=null;
     const catchYard = Phaser.Math.Between(8,14);
     state.yardLine = catchYard; state.down=1; state.toGo=10; state.possession='team';
+    // INNO I38: set field position penalty flag if starting inside own 10
+    this._fieldPosPenalty = catchYard <= 10;
     this._showReturnLaneChoice(catchYard);
   }
 
@@ -3947,7 +4002,7 @@ export class FieldScene extends Phaser.Scene {
     const W=this.scale.width,H=this.scale.height;
     const flash=this.add.text(W/2,H/2,'OVERTIME!',{fontSize:'38px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(70);
     this.tweens.add({targets:flash,scaleX:1.25,scaleY:1.25,duration:400,yoyo:true,repeat:2,onComplete:()=>{
-      flash.destroy();this._isOT=true;state.quarter=5;state.plays=0;
+      flash.destroy();this._isOT=true;state._isOT=true;state.quarter=5;state.plays=0;
       const els=[];const cleanup=()=>els.forEach(e=>e?.destroy?.());
       els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(68));
       els.push(this.add.text(W/2,H/2-62,'COIN FLIP — SUDDEN DEATH',{fontSize:'14px',fontFamily:'monospace',fontStyle:'bold',color:'#ffd700',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(69));
@@ -4282,7 +4337,16 @@ export class FieldScene extends Phaser.Scene {
     this._jumpRouteEls=[bg,tx];
     const destroy=()=>{ if(this._jumpRouteEls){this._jumpRouteEls.forEach(e=>e?.destroy());this._jumpRouteEls=null;} };
     bg.once('pointerdown',()=>{ destroy(); this._jumpRouteActive=true; this._tdFlash('✋ JUMPED!','#f59e0b'); });
-    this.time.delayedCall(420,()=>destroy());
+    this.time.delayedCall(420,()=>{destroy();
+      // P120: extended jump route — 2nd window 300ms later, slightly lower INT boost (+15 vs +22)
+      this.time.delayedCall(300,()=>{
+        if(this.phase!=='ai_pass_flight'||this._jumpRouteActive)return;
+        const bg2=this.add.rectangle(W/2,H/2+48,180,26,0xfbbf24,1).setDepth(35).setInteractive({useHandCursor:true});
+        const tx2=this.add.text(W/2,H/2+48,'⬆ LATE JUMP',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#000'}).setOrigin(0.5).setDepth(36);
+        bg2.once('pointerdown',()=>{bg2.destroy();tx2.destroy();this._jumpRouteActive=true;this._coverageAssignMod=-7;this._tdFlash('⬆ LATE JUMP!','#fbbf24');});
+        this.time.delayedCall(350,()=>{bg2?.destroy?.();tx2?.destroy?.();});
+      });
+    });
   }
   // ─── P75: Scramble Slide ───
   _showSlideOption() {
