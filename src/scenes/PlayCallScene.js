@@ -11,6 +11,8 @@ const CALLS = [
   { id:'pass_action', label:'Play Action',  cat:'pass', tip:'Fake run — freezes DBs' },
   { id:'screen_pass',    label:'Screen Pass',   cat:'pass', tip:'RB flat — linemen release' },
   { id:'sideline_route', label:'Sideline Route', cat:'pass', tip:'WR out — clock stops' },
+  { id:'te_seam',        label:'TE Seam',        cat:'pass', tip:'TE vertical — LB mismatch' },
+  { id:'wildcat',        label:'Wildcat',         cat:'run',  tip:'RB takes snap — dual option' },
 ];
 
 export class PlayCallScene extends Phaser.Scene {

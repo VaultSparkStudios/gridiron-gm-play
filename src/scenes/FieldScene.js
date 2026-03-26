@@ -78,6 +78,8 @@ export class FieldScene extends Phaser.Scene {
     this._bumpCovEls = []; this._slideEls = []; this._rzRunEls = []; this._penaltyEls = []; this._twoMinFired1 = false; this._twoMinFired2 = false;
     // P80 flags: H1 play clock, G4 jump ball, B3 crowd noise, G3 pressure bar
     this._playClockMs = 0; this._playClockEl = null;
+    // P81-P85 flags
+    this._teSeamActive = false; this._dlStunt = false; this._crackBlock = false; this._pumpFake = false; this._wildcatActive = false; this._pumpFakeBonus = 0; this._pumpFakeBtn = null;
     this._jmpBonus = 0;
     this._crowdNoise = false; this._pressureBar = null;
     // V3: speed trail graphics
@@ -346,6 +348,8 @@ export class FieldScene extends Phaser.Scene {
     this.jukeCD = 0;
     // H1: reset play clock each snap
     if(state.possession==='team'){this._playClockMs=40000;this._playClockEl?.setColor('#94a3b8').setText('⏱ 40');}else{this._playClockEl?.setText('');}
+    // P82: show DL stunt button when defending
+    if(state.possession!=='team')this.time.delayedCall(200,()=>this._showDLStuntBtn());
     this._spinUsed = false; // P38: reset per play
     this._holdingRoll = false; // P48: reset per play
     this._audibleActive = this._audibleActive||null; // P45: preserve audible across presnap
@@ -474,7 +478,13 @@ export class FieldScene extends Phaser.Scene {
     // P72: track 3rd down attempts
     if(state.down===3){this._thirdDownAtt++;this._updateThirdHUD();}
     // P71: show MOTION button for pass plays before snap
-    if((callId.startsWith('pass_')||callId==='sideline_route')&&state.possession==='team'&&!this._motionActive){this._showMotionBtn(callId);return;}
+    if((callId.startsWith('pass_')||callId==='sideline_route'||callId==='te_seam')&&state.possession==='team'&&!this._motionActive){this._showMotionBtn(callId);return;}
+    // P84: show PUMP FAKE button for pass plays
+    this._pumpFakeBonus=0;
+    // P82: DL stunt reset each play
+    this._dlStunt=false;
+    // P83: crack block reset each play
+    this._crackBlock=false;
     // P56: Goal line formation flash
     if(this._isGoalLine()&&state.possession==='team')this._applyGoalLineFormation();
     // P17: False start ~4% (offensive penalty, -5 yards, no play); P43: +5% AI false start in comeback mode
@@ -496,6 +506,8 @@ export class FieldScene extends Phaser.Scene {
         this._startRun(callId);
       }
     }
+    else if (callId === 'te_seam')                                        this._startTESeam();
+    else if (callId === 'wildcat')                                        this._startWildcat();
     else if (callId === 'sideline_route')                                 this._startSidelineRoute();
     else if (callId === 'screen_pass')                                    this._startScreenPass();
     else if (callId === 'pass_action')                                    this._startPlayAction();
@@ -728,6 +740,8 @@ export class FieldScene extends Phaser.Scene {
 
     Sound.whistle();
     this.events.emit('phaseChange', 'run');
+    // P83: Crack block 20% chance on runs
+    if(!isScramble&&state.possession==='team')this._tryCrackBlock(()=>{});
     // P75: Scramble Slide option inside own 20
     if(isScramble && state.yardLine<=20){ this.time.delayedCall(200,()=>this._showSlideOption()); }
     // P76: Red Zone Run Option inside opp 20
@@ -907,6 +921,8 @@ export class FieldScene extends Phaser.Scene {
     this._startPassRush(isAction);
     Sound.whistle();
     this.events.emit('phaseChange', 'pass');
+    // P84: Show pump fake button briefly on pass plays
+    if(state.possession==='team')this._showPumpFakeBtn(()=>{});
     // P54: Show QB reads overlay before receivers are clickable
     if (state.possession === 'team') { this._qbReadsActive = true; this._showQBReads(); }
     this.time.delayedCall(isAction ? 850 : 550, () => this._buildReceiverTargets(isAction));
@@ -1295,6 +1311,10 @@ export class FieldScene extends Phaser.Scene {
         // P54: expanded audible hot-route bonus
         const audibleRoute = this._activeAudible ? AUDIBLE_ROUTES[this._activeAudible] : null;
         if (audibleRoute) { compCh = clamp(compCh + audibleRoute.passBonus, 0.10, 0.92); }
+        // P84: pump fake bonus +10% comp
+        if(this._pumpFakeBonus){compCh=Math.min(0.92,compCh+this._pumpFakeBonus);this._pumpFakeBonus=0;}
+        // P82: DL stunt — opponent sack bonus (only applies when opp has possession)
+        if(this._dlStunt&&state.possession!=='team'){intCh=Math.min(0.30,intCh+0.08);this._dlStunt=false;}
         // B4: QB personality modifiers — 'clutch' +8% in Q4; 'money' -8% when fatigued
         const _qbPerso=qb.personality;
         if(_qbPerso==='clutch'&&state.quarter>=4)compCh=Math.min(0.92,compCh+0.08);
@@ -1376,6 +1396,8 @@ export class FieldScene extends Phaser.Scene {
       }
       this._lastReceiver = null;
     }
+    // P83: crack block bonus +2-4 yds on run
+    if(isRun&&this._crackBlock){const cbYds=Phaser.Math.Between(2,4);yards=Math.min(yards+cbYds,99-state.yardLine);this._crackBlock=false;}
     // GO2: track POTG for runs
     if(isRun&&yards>0&&(!state.bestPlay||yards>(state.bestPlay.yards||0))){const _bpr=call==='scramble'?qb:rb;state.bestPlay={name:_bpr.name?.split(' ').pop()||'RB',yards,type:td?'RUSH TD':'RUSH'};}
 
@@ -3765,6 +3787,112 @@ export class FieldScene extends Phaser.Scene {
     dBg.once('pointerdown',()=>{ destroy(); this._tdFlash('🏋️ POWER DIVE','#ef4444'); if(this._resolvePlay)this._rzRunBonus={type:'dive',bonus:0.12}; });
     sBg.once('pointerdown',()=>{ destroy(); this._tdFlash('💨 SWEEP OUTSIDE','#22c55e'); if(this._resolvePlay)this._rzRunBonus={type:'sweep',bonus:0.08}; });
     this.time.delayedCall(1500,()=>destroy());
+  }
+
+  // ─── P81: TE Seam Route ───
+  _startTESeam() {
+    this._teSeamActive = true;
+    this.phase = 'pass';
+    Sound.whistle();
+    const W=this.scale.width,H=this.scale.height;
+    const te = this.te || this.rb;
+    const teStart = { x: te.x, y: te.y };
+    const teData = state.team?.players?.find(p=>p.pos==='TE') || {ovr:76,spd:74};
+    const defLB = state.opponent?.players?.find(p=>['LB','S'].includes(p.pos)) || {ovr:74};
+    // Animate TE running seam upfield
+    this.tweens.add({ targets: te, x: te.x + 180, duration: 900, ease: 'Sine.easeIn', onUpdate: ()=>this._syncLbl(te) });
+    const fl=this.add.text(W/2,FIELD_Y+FIELD_H/2-18,'TE SEAM',{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(22);
+    this.time.delayedCall(300,()=>fl?.destroy());
+    // Show pump fake button briefly
+    this._showPumpFakeBtn(()=>{
+      this.time.delayedCall(600,()=>{
+        const catchCh = teData.ovr > defLB.ovr ? 0.70 : 0.50;
+        const caught = Math.random() < (catchCh + this._pumpFakeBonus);
+        const yds = caught ? Phaser.Math.Between(8,18) : 0;
+        this._teSeamActive = false;
+        this._tdFlash(caught?`✅ TE SEAM — ${yds} yds`:'❌ TE SEAM — Incomplete','#22c55e');
+        this._resolvePlay(1.0, caught?'complete':'covered', yds);
+      });
+    });
+  }
+
+  // ─── P82: DL Stunts ───
+  _showDLStuntBtn() {
+    if(state.possession==='team')return; // Only when defending
+    const W=this.scale.width,H=this.scale.height;
+    const bg=this.add.rectangle(W/2,FIELD_Y+FIELD_H+38,100,22,0xef4444,0.9).setDepth(22).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W/2,FIELD_Y+FIELD_H+38,'🌀 STUNT',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(23);
+    const destroy=()=>{bg?.destroy();tx?.destroy();};
+    bg.once('pointerdown',()=>{destroy();this._dlStunt=true;this._tdFlash('DL STUNT! +8% SACK','#ef4444');});
+    this.time.delayedCall(2000,()=>destroy());
+  }
+
+  // ─── P83: WR Crack Block ───
+  _tryCrackBlock(onDone) {
+    if(Math.random()>0.20){onDone();return;}
+    this._crackBlock=true;
+    const wr=this.wr1||this.rb;const cb=this.cb1||this.lb;
+    this._tdFlash('CRACK BLOCK!','#f59e0b');
+    this.tweens.add({targets:wr,x:cb.x-20,y:cb.y,duration:400,ease:'Quad.easeOut',onUpdate:()=>this._syncLbl(wr),onComplete:()=>{
+      this.tweens.add({targets:cb,x:cb.x+30,duration:200,onUpdate:()=>this._syncLbl(cb),onComplete:()=>onDone()});
+    }});
+  }
+
+  // ─── P84: Pump Fake ───
+  _showPumpFakeBtn(onDone) {
+    const W=this.scale.width,H=this.scale.height;
+    const bg=this.add.rectangle(W/2,FIELD_Y+FIELD_H+38,100,22,0x7c3aed,0.9).setDepth(22).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W/2,FIELD_Y+FIELD_H+38,'🎭 PUMP!',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(23);
+    const destroy=()=>{bg?.destroy();tx?.destroy();};
+    let done=false;
+    bg.once('pointerdown',()=>{
+      if(done)return;done=true;destroy();
+      this._pumpFake=true;
+      this._tdFlash('PUMP FAKE!','#a78bfa');
+      // QB fake throw animation — slight body movement
+      this.tweens.add({targets:this.qb,x:this.qb.x-6,duration:100,yoyo:true,onUpdate:()=>this._syncLbl(this.qb)});
+      // CBs pause 200ms
+      const cb1=this.cb1,cb2=this.cb2;
+      const origX1=cb1?.x,origX2=cb2?.x;
+      if(cb1)cb1.setActive(false);if(cb2)cb2.setActive(false);
+      this.time.delayedCall(200,()=>{if(cb1)cb1.setActive(true);if(cb2)cb2.setActive(true);});
+      this._pumpFakeBonus=0.10;
+    });
+    this.time.delayedCall(800,()=>{if(!done){done=true;destroy();}onDone();});
+  }
+
+  // ─── P85: Wildcat Package ───
+  _startWildcat() {
+    this._wildcatActive=true;
+    this.phase='presnap';
+    Sound.whistle();
+    const W=this.scale.width,H=this.scale.height;
+    const rbData=state.team?.players?.find(p=>p.pos==='RB')||{ovr:78,spd:86,str:75};
+    const fl=this.add.text(W/2,FIELD_Y+FIELD_H/2-24,'⚡ WILDCAT',{fontSize:'14px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(22);
+    this.time.delayedCall(800,()=>fl?.destroy());
+    // Show KEEP or PASS option
+    const bg=this.add.rectangle(W/2,H/2+60,240,28,0x1e293b,0.95).setDepth(23).setStrokeStyle(1,0xf59e0b);
+    const kBg=this.add.rectangle(W/2-60,H/2+60,110,28,0x166534,1).setDepth(24).setInteractive({useHandCursor:true});
+    const kTx=this.add.text(W/2-60,H/2+60,'🏃 KEEP (RB Run)',{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#86efac'}).setOrigin(0.5).setDepth(25);
+    const pBg=this.add.rectangle(W/2+60,H/2+60,110,28,0x7c3aed,1).setDepth(24).setInteractive({useHandCursor:true});
+    const pTx=this.add.text(W/2+60,H/2+60,'🏈 PASS (Option)',{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#e9d5ff'}).setOrigin(0.5).setDepth(25);
+    const els=[bg,kBg,kTx,pBg,pTx];
+    const destroy=()=>{els.forEach(e=>e?.destroy());this._wildcatActive=false;};
+    kBg.once('pointerdown',()=>{
+      destroy();this.phase='run';
+      const strBonus=(rbData.str||70)/200;
+      const yds=Math.round((2+strBonus*4+Phaser.Math.Between(-1,4)));
+      this._tdFlash(`🏃 WILDCAT KEEP — ${yds} yds`,'#f59e0b');
+      this._resolvePlay(1.0,'run',yds);
+    });
+    pBg.once('pointerdown',()=>{
+      destroy();this.phase='pass';
+      const caught=Math.random()<0.40;
+      const yds=caught?Phaser.Math.Between(8,20):0;
+      this._tdFlash(caught?`🏈 WILDCAT PASS — ${yds} yds`:'❌ WILDCAT PASS — Incomplete','#a78bfa');
+      this._resolvePlay(1.0,caught?'complete':'covered',yds);
+    });
+    this.time.delayedCall(4000,()=>{if(this._wildcatActive){destroy();this.phase='run';const yds=Phaser.Math.Between(1,5);this._tdFlash(`WILDCAT AUTO — ${yds} yds`,'#f59e0b');this._resolvePlay(1.0,'run',yds);}});
   }
 
   // ─── P77: Penalty Accept/Decline ───
