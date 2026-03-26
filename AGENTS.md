@@ -1,25 +1,14 @@
-# Agent Instructions — Gridiron GM Play
+# Project Agent Guide
 
-## Repo identity
+## Studio OS
 
-- Repo name: `gridiron-gm-play`
-- GitHub: `VaultSparkStudios/gridiron-gm-play`
-- Public URL: `https://vaultsparkstudios.com/gridiron-gm-play/`
-- Type: Browser-based real-time football gameplay engine (Phaser 3, multi-scene)
-- Studio: VaultSpark Studios
-- **Companion repo:** `gridiron-gm` — these two repos form one combined product
+This project runs under the VaultSpark Studio OS.
+Local path: `C:\Users\p4cka\documents\development\vaultspark-studio-ops`
+GitHub: https://github.com/VaultSparkStudios/vaultspark-studio-ops
 
-## Relationship to gridiron-gm
-
-This repo is the **Play module** of Gridiron GM. It does not run standalone in production.
-
-- `gridiron-gm` is the GM (franchise management) app — React, single JSX file
-- `gridiron-gm-play` is the Play (real-time gameplay) engine — Phaser 3, Vite, multi-scene
-- They communicate via **localStorage bridge keys**:
-  - `gm_roster_export` — GM writes; Play reads on boot
-  - `gm_game_result` — Play writes on game over; GM reads on import
-
-Changes to the bridge contract (key names, data shapes) must be coordinated across both repos in the same session.
+Read `vaultspark-studio-ops/docs/templates/` for canonical templates and conventions.
+Read `vaultspark-studio-ops/portfolio/PROJECT_REGISTRY.md` for all active studio projects.
+Read `vaultspark-studio-ops/docs/STUDIO_HUB_ONBOARDING.md` for hub acceptance requirements.
 
 ## Read order
 
@@ -27,17 +16,96 @@ Changes to the bridge contract (key names, data shapes) must be coordinated acro
 2. `context/SOUL.md`
 3. `context/BRAIN.md`
 4. `context/CURRENT_STATE.md`
-5. `context/TASK_BOARD.md`
-6. `context/LATEST_HANDOFF.md`
+5. `context/DECISIONS.md`
+6. `context/TASK_BOARD.md`
+7. `context/LATEST_HANDOFF.md`
+8. `context/SELF_IMPROVEMENT_LOOP.md`
 
-## Non-negotiable rules
+## Required Studio OS files
 
-- NEVER change `gm_roster_export` or `gm_game_result` key names without updating both repos simultaneously
-- Multi-scene Phaser architecture — each scene is one file in `src/scenes/`
-- Shared mutable state lives in `src/data/gameState.js` only
-- Sound effects via `src/utils/sound.js` — Web Audio API, no audio files
-- Match the existing compact, functional code style
-- Every play-side change that affects exported stats or scores must be reflected in `gridiron-gm` `importPlayResult()`
+Every session should confirm these files exist and are current:
+
+| File | When to update |
+|---|---|
+| `context/LATEST_HANDOFF.md` | Every closeout — primary handoff |
+| `context/CURRENT_STATE.md` | When shipped behavior changes |
+| `context/TASK_BOARD.md` | When tasks complete or new ones are added |
+| `context/DECISIONS.md` | When a meaningful decision is made |
+| `context/PROJECT_BRIEF.md` | When scope or purpose changes |
+| `context/SELF_IMPROVEMENT_LOOP.md` | Every closeout — append audit + brainstorm entry |
+| `docs/CREATIVE_DIRECTION_RECORD.md` | Every time the human gives creative direction (ADDITIVE ONLY) |
+| `logs/WORK_LOG.md` | Every closeout — append session entry |
+
+## Closeout write-back (mandatory)
+
+After any meaningful session, write back in this order:
+1. `context/CURRENT_STATE.md`
+2. `context/TASK_BOARD.md`
+3. `context/LATEST_HANDOFF.md`
+4. `logs/WORK_LOG.md`
+5. `context/DECISIONS.md` (if decisions made)
+6. `context/SELF_IMPROVEMENT_LOOP.md` — score, brainstorm, commit 1–2 items to TASK_BOARD
+7. `docs/CREATIVE_DIRECTION_RECORD.md` — append if human gave any creative direction this session
+
+## Self-Improvement Loop (mandatory)
+
+Every closeout MUST include a Self-Improvement Loop entry in `context/SELF_IMPROVEMENT_LOOP.md`:
+
+1. Score project across 5 categories (Dev Health / Creative Alignment / Momentum / Engagement / Process Quality)
+2. Compare to prior scores — note ↑ ↓ → per category
+3. Name 1 top win and 1 top gap
+4. Brainstorm 3–5 innovative solutions or features
+5. Commit 1–2 brainstorm items to TASK_BOARD labeled `[SIL]`
+
+At session start, read `context/SELF_IMPROVEMENT_LOOP.md` and check if prior `[SIL]` commitments were actioned. If a `[SIL]` item has been skipped 2+ sessions, escalate it to **Now** on TASK_BOARD.
+
+## Creative Direction Record (mandatory enforcement)
+
+`docs/CREATIVE_DIRECTION_RECORD.md` is ADDITIVE ONLY.
+
+**Agents MUST append an entry whenever the human provides:**
+- Any creative direction (features, feel, scope)
+- Feature assignments or explicit goals
+- Brand, tone, visual, or quality guidance
+- Canon-affecting decisions
+- Explicit "do this / don't do this" instruction
+
+**Agents MUST NOT:**
+- Add CDR entries autonomously without human input
+- Modify or delete existing CDR entries
+- Skip CDR even for "small" directions — every human direction counts
+
+## Studio Hub integration
+
+This project is tracked in the VaultSpark Studio Hub at `vaultsparkstudios.com/studio-hub/`.
+The hub reads `context/PROJECT_STATUS.json` from this repo via GitHub API.
+
+For hub visibility, keep `context/PROJECT_STATUS.json` current with:
+- `status` — incubating / active / live / maintained / archived
+- `health` — green / yellow / red
+- `currentFocus` — one-line description of active work
+- `nextMilestone` — next concrete deliverable
+- `blockers` — array of blocking items (empty if none)
+- `lastUpdated` — ISO date of last update
+
+## Active Session Beacon
+
+To show an active session indicator in the Studio Hub, add these hooks to your `CLAUDE.md`:
+
+```bash
+# On session start — replace PROJECT_ID and GIST_ID:
+gh gist edit GIST_ID -f active.json <<EOF
+{"active":[{"project":"PROJECT_ID","agent":"claude-code","since":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}]}
+EOF
+
+# On session end:
+gh gist edit GIST_ID -f active.json <<EOF
+{"active":[]}
+EOF
+```
+
+Get the Gist ID from Hub Settings → "Active Session Beacon — GitHub Gist ID".
+Get PROJECT_ID from the project's `id` field in `src/data/studioRegistry.js`.
 
 ## Session aliases
 
@@ -45,31 +113,10 @@ If the user says only `start`, follow `prompts/start.md`.
 
 If the user says only `closeout`, follow `prompts/closeout.md`.
 
-## After meaningful work
-
-1. Update `context/CURRENT_STATE.md`
-2. Update `context/TASK_BOARD.md`
-3. Append to `context/DECISIONS.md` for architectural decisions
-4. Update `context/LATEST_HANDOFF.md`
-5. Append to `logs/WORK_LOG.md`
-6. If bridge contract changed: note the corresponding change needed in `gridiron-gm`
-
 ## Escalate before changing
 
-- localStorage bridge key names or payload shapes
-- Scene names or registration order in `src/main.js`
-- Public URL or slug
-- Deployment workflows
-
-## Key files
-
-- `src/main.js` — Phaser config, registers all scenes
-- `src/scenes/FieldScene.js` — main gameplay engine
-- `src/scenes/BootScene.js` — title screen + GM export reader
-- `src/scenes/HudScene.js` — persistent score/down overlay
-- `src/scenes/PlayCallScene.js` — play call menu (8 plays)
-- `src/scenes/GameOverScene.js` — final score + export trigger
-- `src/data/gameState.js` — shared mutable state
-- `src/data/defaultRoster.js` — fallback roster when no GM export
-- `src/utils/sound.js` — Web Audio API helpers
-- `docs/STUDIO_DEPLOYMENT_STANDARD.md` — deployment rules
+- canon
+- public promises
+- rights or provenance
+- launch dates
+- security or data handling
