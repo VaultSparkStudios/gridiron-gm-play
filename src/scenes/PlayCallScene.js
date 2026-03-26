@@ -7,6 +7,7 @@ const CALLS = [
   { id:'run_draw',    label:'Draw Play',    cat:'run',  tip:'RB delays — freezes D' },
   { id:'wildcat',     label:'Wildcat',      cat:'run',  tip:'RB takes snap — dual option' },
   { id:'end_around',  label:'End Around',   cat:'run',  tip:'WR takes snap — edge run' },
+  { id:'read_option', label:'Read Option',  cat:'run',  tip:'QB reads DE — KEEP or PITCH' },
   { id:'pass_quick',  label:'Quick Pass',   cat:'pass', tip:'Safe — low INT risk' },
   { id:'pass_medium', label:'Medium Route', cat:'pass', tip:'Balanced timing' },
   { id:'pass_deep',   label:'Deep Shot',    cat:'pass', tip:'High risk / reward' },
@@ -15,6 +16,8 @@ const CALLS = [
   { id:'sideline_route', label:'Sideline Route', cat:'pass', tip:'WR out — clock stops' },
   { id:'te_seam',        label:'TE Seam',        cat:'pass', tip:'TE vertical — LB mismatch' },
   { id:'flea_flicker',   label:'Flea Flicker',   cat:'pass', tip:'Handoff → pitch back → deep' },
+  // P98
+  { id:'qb_kneel',       label:'QB Kneel',       cat:'run',  tip:'Lose 1 yd — kills clock' },
 ];
 
 export class PlayCallScene extends Phaser.Scene {

@@ -34,6 +34,7 @@ export const state = {
 
   // In-game injuries (written to gm_game_result for GM import)
   injuries: [],
+  oppPlayerInjuries: [],   // opponent player injuries to send back to GM
 
   // Weather: 'clear' | 'rain' | 'snow'
   weather: 'clear',
@@ -78,6 +79,7 @@ export function resetState() {
   state.drives = [];
   state.currentDrive = null;
   state.injuries = [];
+  state.oppPlayerInjuries = [];
   state.weather = 'clear';
   state.gameId = null;
   state.bestPlay = null;
@@ -112,10 +114,12 @@ export function exportStats() {
     gameId: state.gameId || null,
     playerDeltas: state.team?.players?.map(p => {
       const ps = state.playerStats[p.id] || {};
-      const d = { id:p.id, pos:p.pos, name:p.name, passYds:ps.passYds||0, att:ps.att||0, comp:ps.comp||0, passTD:ps.passTD||0, ints:ps.int||0, rushYds:ps.rushYds||0, rushAtt:ps.rushAtt||0, rtds:ps.rushTD||0, recYds:ps.recYds||0, rec:ps.rec||0, retds:ps.recTD||0 };
+      const d = { id:p.id, pos:p.pos, name:p.name, passYds:ps.passYds||0, att:ps.att||0, comp:ps.comp||0, passTD:ps.passTD||0, ints:ps.int||0, rushYds:ps.rushYds||0, rushAtt:ps.rushAtt||0, rtds:ps.rushTD||0, recYds:ps.recYds||0, rec:ps.rec||0, retds:ps.recTD||0, sacks:ps.sack||0, tkl:ps.tkl||0, defInts:ps.defInt||0, pd:ps.pd||0 };
       d.grade = computeGrade(d);
       return d;
     }) || [],
+    // B-bridge: opponent player injuries sustained during Play
+    oppPlayerInjuries: state.oppPlayerInjuries || [],
   };
   try { localStorage.setItem('gm_game_result', JSON.stringify(out)); } catch {}
   return out;

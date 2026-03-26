@@ -82,6 +82,10 @@ export class FieldScene extends Phaser.Scene {
     this._teSeamActive = false; this._dlStunt = false; this._crackBlock = false; this._pumpFake = false; this._wildcatActive = false; this._pumpFakeBonus = 0; this._pumpFakeBtn = null;
     // P86-P90 flags
     this._fleaFlickerActive = false; this._endAroundActive = false; this._qbSneakActive = false; this._blitzPackage = false; this._blitzBtn = null;
+    // P91-P95 flags
+    this._counterBtn = null; this._readOptionActive = false; this._readOptionChoice = false; this._secondReadActive = false; this._secondReadBtn = null; this._driveSummaryShown = false; this._fgIced = false;
+    // P96-P97 flags
+    this._coverageAssignMod = 0; this._jumpRouteActive = false; this._jumpRouteEls = null;
     this._jmpBonus = 0;
     this._crowdNoise = false; this._pressureBar = null;
     // Tendency tracker: rolling window of last 6 calls ('run'|'pass') for AI counter-calling
@@ -510,7 +514,19 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     if      (callId === 'punt')                              this._showFakePuntOption();
-    else if (callId === 'fg')                                this._showFakeFGOption();
+    else if (callId === 'fg') {
+      // P95: Field Goal Ice — 8% chance opponent calls timeout before kick
+      if (!this._fgIced && Math.random() < 0.08) {
+        this._fgIced = true;
+        const W = this.scale.width;
+        const iceCard = this.add.rectangle(W/2, FIELD_Y + FIELD_H/2, 160, 56, 0x0f172a, 0.95).setDepth(55).setStrokeStyle(2, 0xf59e0b);
+        const iceTxt = this.add.text(W/2, FIELD_Y + FIELD_H/2 - 10, '⏱️ TIMEOUT CALLED\nOpponent ices the kicker!', {fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',align:'center'}).setOrigin(0.5).setDepth(56);
+        this.time.delayedCall(2200, () => { iceCard.destroy(); iceTxt.destroy(); this._showFakeFGOption(); });
+      } else {
+        this._fgIced = false;
+        this._showFakeFGOption();
+      }
+    }
     else if (callId.startsWith('run_') || callId === 'scramble') {
       if (callId.startsWith('run_') && state.toGo<=1 && state.yardLine>=94) {
         this._tryGoalLineSneak(()=>{ if(!this._noHuddleActive&&Math.random()<0.15)this._showTrickOption(callId);else this._startRun(callId); });
@@ -527,6 +543,8 @@ export class FieldScene extends Phaser.Scene {
     else if (callId === 'flea_flicker')                                   this._startFleaFlicker();
     else if (callId === 'end_around')                                     this._startEndAround();
     else if (callId === 'qb_sneak')                                       this._startQBSneak();
+    else if (callId === 'read_option')                                    this._startReadOption();
+    else if (callId === 'qb_kneel')                                       this._startQBKneel();
     else if (callId === 'pass_action')                                    this._startPlayAction();
     else if (callId.startsWith('pass_')) {
       // P44: Hail Mary on 4th & long from deep in own territory
@@ -945,6 +963,22 @@ export class FieldScene extends Phaser.Scene {
     // P54: Show QB reads overlay before receivers are clickable
     if (state.possession === 'team') { this._qbReadsActive = true; this._showQBReads(); }
     this.time.delayedCall(isAction ? 850 : 550, () => this._buildReceiverTargets(isAction));
+    // P93: Second Read Toggle button
+    if (state.possession === 'team') {
+      this.time.delayedCall(400, () => {
+        if (this.phase !== 'pass_wait') return;
+        this._secondReadActive = false;
+        this._secondReadBtn = this.add.text(this.qb.x + 34, this.qb.y + 14, '👁 2ND READ', {
+          fontSize:'8px', fontFamily:'monospace', fontStyle:'bold', color:'#ffffff',
+          backgroundColor:'#1d4ed8', padding:{x:4,y:3}
+        }).setOrigin(0.5).setDepth(20).setInteractive({useHandCursor:true});
+        this._secondReadBtn.on('pointerdown', () => {
+          this._secondReadActive = !this._secondReadActive;
+          this._secondReadBtn?.setText(this._secondReadActive ? '👁 1ST READ' : '👁 2ND READ');
+          this._secondReadBtn?.setStyle({backgroundColor: this._secondReadActive ? '#7c3aed' : '#1d4ed8'});
+        });
+      });
+    }
   }
 
   // 5-man OL forms protective pocket: LT/LG/C/RG/RT arc in front of QB
@@ -1054,6 +1088,28 @@ export class FieldScene extends Phaser.Scene {
       onUpdate:()=>{if(!_pbGfx.scene)return;const h=Math.round(FIELD_H*_pbObj.pct);_pbGfx.clear();_pbGfx.fillStyle(_pbObj.pct>0.8?0xef4444:_pbObj.pct>0.5?0xf97316:0xf59e0b,0.82);_pbGfx.fillRect(_pbX-4,FIELD_Y+FIELD_H-h,8,h);},
       onComplete:()=>{},
     });
+    // P91: Pass Rush Counter Move button
+    this.time.delayedCall(700 + rushDelay, () => {
+      if (!this._passRushActive || this._counterBtn) return;
+      this._counterBtn = this.add.text(this.qb.x + 34, this.qb.y - 12, '🥊 COUNTER', {
+        fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#ffffff',
+        backgroundColor:'#7c3aed', padding:{x:5,y:3}
+      }).setOrigin(0.5).setDepth(20).setInteractive({useHandCursor:true});
+      this._counterBtn.on('pointerdown', () => {
+        if (!this._counterBtn) return;
+        this._counterBtn.destroy(); this._counterBtn = null;
+        const olOvr = this._pocketOvrs?.[0] || 77;
+        const breakChance = 0.55 + (olOvr - 70) * 0.005;
+        if (Math.random() < breakChance) {
+          // Counter works — re-block the first beaten rusher for 1200ms
+          this._pocketBeaten[0] = false;
+          this.pressureTxt?.setText('COUNTER! Rusher reset');
+          this.time.delayedCall(1200, () => { this._pocketBeaten[0] = true; });
+        } else {
+          this.pressureTxt?.setText('Counter FAILED!');
+        }
+      });
+    });
   }
 
   _clearPassRush() {
@@ -1061,6 +1117,10 @@ export class FieldScene extends Phaser.Scene {
     this._pocketBeaten = [false, false, false, false, false];
     this.pressureTxt?.destroy(); this.pressureTxt = null;
     this._spinBtn?.destroy(); this._spinBtn = null; this._spinBtnTxt?.destroy(); this._spinBtnTxt = null;
+    // P91: destroy counter button
+    this._counterBtn?.destroy(); this._counterBtn = null;
+    // P93: destroy second read button
+    this._secondReadBtn?.destroy(); this._secondReadBtn = null; this._secondReadActive = false;
     // G3: destroy pressure bar
     this._pressureBar?.bg?.destroy(); this._pressureBar?.gfx?.destroy(); this._pressureBar?.lbl?.destroy(); this._pressureBar = null;
   }
@@ -1143,6 +1203,9 @@ export class FieldScene extends Phaser.Scene {
           {fontSize:'8px',fontFamily:'monospace',color:'#f97316',stroke:'#000',strokeThickness:1}).setDepth(18);
       });
     }
+    // B-bridge: credit sack to user's top DL/LB
+    const _sackDef = (state.team?.players||[]).find(p=>['DL','LB'].includes(p.pos)&&p.id);
+    if (_sackDef) this._track(_sackDef.id, 'sack', 1);
     this._endPlay({ yards:-loss, text:`SACK! -${loss} yards`, type:'sack', turnover:false, td:false });
   }
 
@@ -1173,9 +1236,12 @@ export class FieldScene extends Phaser.Scene {
     const dc = state.opponent?.dcScheme || '4-3';
     const isZone   = dc==='Cover 2' || dc==='Zone Blitz';
     const dbRatings = (state.opponent?.players||[]).filter(p=>['CB','S'].includes(p.pos)).map(p=>p.ovr);
+    const _wr1P = state.team?.players?.find(p=>p.pos==='WR')              || {spd:88,ovr:80,name:'WR', id:'wr1'};
+    const _wr2P = state.team?.players?.filter(p=>p.pos==='WR')[1]          || {spd:84,ovr:76,name:'WR2',id:'wr2'};
+    // P93: swap WR1/WR2 when second read is active
     const receivers = [
-      { dot:this.wr1, p:state.team?.players?.find(p=>p.pos==='WR')              || {spd:88,ovr:80,name:'WR', id:'wr1'} },
-      { dot:this.wr2, p:state.team?.players?.filter(p=>p.pos==='WR')[1]          || {spd:84,ovr:76,name:'WR2',id:'wr2'} },
+      { dot:this.wr1, p:this._secondReadActive ? _wr2P : _wr1P },
+      { dot:this.wr2, p:this._secondReadActive ? _wr1P : _wr2P },
       { dot:this.te,  p:state.team?.players?.find(p=>p.pos==='TE')               || {spd:72,ovr:74,name:'TE', id:'te1'} },
       { dot:this.rb,  p:state.team?.players?.find(p=>p.pos==='RB')               || {spd:86,ovr:78,name:'RB', id:'rb1'} },
     ];
@@ -1499,9 +1565,24 @@ export class FieldScene extends Phaser.Scene {
       if(this._p51Hold){this._p51Hold=false;state.down=Math.max(1,state.down-1);state.toGo=Math.min(state.toGo+10,40);}
       if (state.down > 4) { driveEnd='DOWNS'; state.possession='opp'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10; }
     }
-    if (driveEnd) { state.drives.push({...state.currentDrive, result:driveEnd}); state.currentDrive={poss:state.possession,plays:0,yards:0,start:state.yardLine}; }
+    if (driveEnd) {
+      state.drives.push({...state.currentDrive, result:driveEnd}); state.currentDrive={poss:state.possession,plays:0,yards:0,start:state.yardLine};
+      // P94: Drive Summary Card — 2-second overlay
+      if (!this._driveSummaryShown) {
+        this._driveSummaryShown = true;
+        const dr = state.drives[state.drives.length-1];
+        const W = this.scale.width;
+        const card = this.add.rectangle(W/2, FIELD_Y + FIELD_H/2, 140, 52, 0x0f172a, 0.92).setDepth(50).setStrokeStyle(2, 0x60a5fa);
+        const resColor = driveEnd==='TD'?0xf59e0b:driveEnd==='FG'?0x22c55e:0xef4444;
+        const lbl = this.add.text(W/2, FIELD_Y + FIELD_H/2 - 14, `— DRIVE END: ${driveEnd} —`, {fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:Phaser.Display.Color.IntegerToColor(resColor).rgba}).setOrigin(0.5).setDepth(51);
+        const detail = this.add.text(W/2, FIELD_Y + FIELD_H/2 + 4, `${dr.plays||0} plays • ${dr.yards||0} yds`, {fontSize:'9px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(51);
+        this.time.delayedCall(2000, () => { card.destroy(); lbl.destroy(); detail.destroy(); this._driveSummaryShown = false; });
+      }
+    }
     state.plays++;
     if (state.plays%8===0) { state.quarter=Math.min(4,state.quarter+1); this._recoverFatigue(); }
+    // P100: 100-play milestone flash
+    if(state.plays===100){const W=this.scale.width;const m=this.add.text(W/2,FIELD_Y+FIELD_H/2,'🎖️ 100 PLAYS PLAYED!',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(60);this.tweens.add({targets:m,alpha:0,y:m.y-40,delay:800,duration:1200,onComplete:()=>m?.destroy?.()});}
     // P41: momentum drain on turnover
     if(result.turnover) this._updateMomentum(-12);
     this.events.emit('playResult', result);
@@ -1801,6 +1882,8 @@ export class FieldScene extends Phaser.Scene {
     this.time.delayedCall(100,()=>this._showRushLane());
     // P74: Bump Coverage
     this.time.delayedCall(120,()=>this._showBumpCoverage());
+    // P96: Coverage Assignment
+    this._coverageAssignMod=0; this.time.delayedCall(140,()=>this._showCoverageAssign());
     // Blitz button (top-right)
     const bx=W-52, by=FIELD_Y+18;
     const bBg=this.add.rectangle(bx,by,80,28,0xea580c).setDepth(21).setInteractive({useHandCursor:true});
@@ -1836,6 +1919,7 @@ export class FieldScene extends Phaser.Scene {
       this._tdFlash('SACK! QB DOWN 🏈','#22c55e');
       this.aiDown++; this.aiToGo = Math.min(this.aiToGo+8, 30);
       state.stats.team.sacks = (state.stats.team.sacks||0)+1;
+      const _blitzLB=(state.team?.players||[]).find(p=>p.pos==='LB'&&p.id); if(_blitzLB)this._track(_blitzLB.id,'sack',1);
       const sackYards = Phaser.Math.Between(5,12);
       this._resolveAIPlay(-sackYards);
     } else {
@@ -1847,6 +1931,9 @@ export class FieldScene extends Phaser.Scene {
 
   _aiThrow() {
     this.phase = 'ai_pass_flight';
+    this._jumpRouteActive = false;
+    // P97: Jump Route — brief window mid-flight
+    this.time.delayedCall(140, ()=>this._showJumpRoute());
     const rec = this._aiRecTarget;
     const sx=this.dl.x, sy=this.dl.y, ex=rec.dot.x, ey=rec.dot.y;
     const peakY = Math.min(sy,ey)-30;
@@ -1863,12 +1950,13 @@ export class FieldScene extends Phaser.Scene {
     this.phase='result'; this._clearArc();
     const call=this._defCall||'cover2';
     const defDist=Math.hypot(this.rb.x-rec.dot.x, this.rb.y-rec.dot.y);
-    const intThresh=(call==='man'?56:call==='cover2'?44:32)-(this._passRushCoverBreak?20:0);
-    this._passRushCoverBreak=false;
+    const intThresh=(call==='man'?56:call==='cover2'?44:32)-(this._passRushCoverBreak?20:0)+(this._coverageAssignMod||0)+(this._jumpRouteActive?22:0);
+    this._passRushCoverBreak=false; this._coverageAssignMod=0; this._jumpRouteActive=false;
     if(defDist<intThresh){
       Sound.int();
       state.stats.team.int=(state.stats.team.int||0)+1;
       this._tdFlash('INTERCEPTED! 🏈','#22c55e');
+      const _intCB=(state.team?.players||[]).find(p=>['CB','S'].includes(p.pos)&&p.id); if(_intCB)this._track(_intCB.id,'defInt',1);
       // P36: Pick-six return mini-game
       this._launchPickSixReturn(rec.dot);
       return;
@@ -1897,6 +1985,8 @@ export class FieldScene extends Phaser.Scene {
       hud?.events?.emit('playResult',result); hud?.events?.emit('possessionChange','team');
       if(!state._halfShown&&state.quarter>=3){state._halfShown=true;this.time.delayedCall(1600,()=>this._showHalftime());return;}
       if(state.quarter>4||state.plays>=40){this.time.delayedCall(2000,()=>this.scene.start('GameOver'));}
+      // P99: Onside kick option if trailing late
+      else if(state.quarter>=4&&(state.score.opp-state.score.team)>=8){this.time.delayedCall(2000,()=>this._showOnsideKickOption());}
       else{this.time.delayedCall(2400,()=>this._startKickoffReturn());}
       return;
     }
@@ -2082,6 +2172,9 @@ export class FieldScene extends Phaser.Scene {
     if (this.aiDown>4) { state.drives.push({poss:'opp',plays:this._aiDrivePlays,yards:this._aiDriveYards,start:this._aiDriveStart||25,result:'DOWNS'}); this._aiDrivePlays=0; this._aiDriveYards=0; state.possession='team'; state.yardLine=Math.max(5,100-state.yardLine); state.down=1; state.toGo=10; }
     state.plays++;
     if (state.plays%8===0) state.quarter=Math.min(4,state.quarter+1);
+    const _tklDef=(state.team?.players||[]).find(p=>['LB','CB','S'].includes(p.pos)&&p.id); if(_tklDef)this._track(_tklDef.id,'tkl',1);
+    // B-bridge: opponent player injury chance on hard tackle
+    if(yardsGiven>0 && Math.random()<0.04){ const _oppHurt=(state.opponent?.players||[]).find(p=>['RB','WR','QB'].includes(p.pos)&&p.id); if(_oppHurt&&!state.oppPlayerInjuries.find(i=>i.id===_oppHurt.id)) state.oppPlayerInjuries.push({id:_oppHurt.id,pos:_oppHurt.pos,name:_oppHurt.name,type:'game'}); }
     const result = { text:`Stop! AI +${yardsGiven}yd${yardsGiven!==1?'s':''}`, yards:yardsGiven, td:false, turnover:false };
     this.events.emit('playResult', result);
     const hud = this.scene.get('Hud');
@@ -3862,6 +3955,40 @@ export class FieldScene extends Phaser.Scene {
     this.time.delayedCall(680,()=>destroy());
   }
 
+  // ─── P96: Coverage Assignment ───
+  _showCoverageAssign() {
+    if(this.phase!=='ai_pass')return;
+    const W=this.scale.width,H=this.scale.height;
+    const els=[];const cleanup=()=>els.forEach(e=>e?.destroy?.());
+    const bg=this.add.rectangle(W/2,FIELD_Y+68,220,44,0x0f172a,0.92).setDepth(50);
+    const ht=this.add.text(W/2,FIELD_Y+54,'🛡️ ASSIGN COVERAGE',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#38bdf8',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(51);
+    els.push(bg,ht);
+    const cbD=(state.team?.players||[]).find(p=>p.pos==='CB')||{ovr:75,name:'CB'};
+    const wrD=(state.opponent?.players||[]).find(p=>p.pos==='WR')||{ovr:78,name:'WR'};
+    [{label:'TIGHT\nMAN',note:`CB${cbD.ovr} vs WR${wrD.ovr}`,mod:14,color:0x22c55e},
+     {label:'SOFT\nZONE',note:'Safer vs deep',mod:-8,color:0x3b82f6}
+    ].forEach((opt,i)=>{
+      const bx=W/2-60+i*120;
+      const rb=this.add.rectangle(bx,FIELD_Y+72,106,30,opt.color,0.22).setDepth(51).setInteractive({useHandCursor:true});
+      const rt=this.add.text(bx,FIELD_Y+68,opt.label,{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#fff',align:'center'}).setOrigin(0.5).setDepth(52);
+      const rs=this.add.text(bx,FIELD_Y+82,opt.note,{fontSize:'7px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(52);
+      rb.on('pointerover',()=>rb.setAlpha(0.55));rb.on('pointerout',()=>rb.setAlpha(1));
+      rb.on('pointerdown',()=>{ this._coverageAssignMod=opt.mod; cleanup(); this._tdFlash(opt.label.replace('\n',' '),'#38bdf8'); });
+      els.push(rb,rt,rs);
+    });
+    this.time.delayedCall(1800,()=>cleanup());
+  }
+  // ─── P97: Jump Route ───
+  _showJumpRoute() {
+    if(this.phase!=='ai_pass_flight')return;
+    const W=this.scale.width,H=this.scale.height;
+    const bg=this.add.rectangle(W/2,H/2+48,180,30,0xf59e0b,1).setDepth(35).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W/2,H/2+48,'✋ JUMP ROUTE!',{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#000',stroke:'#fff',strokeThickness:1}).setOrigin(0.5).setDepth(36);
+    this._jumpRouteEls=[bg,tx];
+    const destroy=()=>{ if(this._jumpRouteEls){this._jumpRouteEls.forEach(e=>e?.destroy());this._jumpRouteEls=null;} };
+    bg.once('pointerdown',()=>{ destroy(); this._jumpRouteActive=true; this._tdFlash('✋ JUMPED!','#f59e0b'); });
+    this.time.delayedCall(420,()=>destroy());
+  }
   // ─── P75: Scramble Slide ───
   _showSlideOption() {
     if(this.phase!=='run')return;
@@ -4074,6 +4201,63 @@ export class FieldScene extends Phaser.Scene {
     }});
   }
 
+  // ─── P92: Read Option ───
+  _startReadOption() {
+    this._readOptionActive = true;
+    this.phase = 'run';
+    Sound.whistle();
+    const qbData = state.team?.players?.find(p => p.pos === 'QB') || { spd: 72, ovr: 72 };
+    const rbData = state.team?.players?.find(p => p.pos === 'RB') || { spd: 86, ovr: 78 };
+    const W = this.scale.width;
+    // Show KEEP / PITCH choice to user
+    const keepBg = this.add.rectangle(W/2 - 44, FIELD_Y+FIELD_H+38, 76, 24, 0x14532d, 0.95).setDepth(22).setInteractive({useHandCursor:true});
+    const keepTx = this.add.text(W/2 - 44, FIELD_Y+FIELD_H+38, `🏃 KEEP (${qbData.spd} SPD)`, {fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#86efac'}).setOrigin(0.5).setDepth(23);
+    const pitchBg = this.add.rectangle(W/2 + 44, FIELD_Y+FIELD_H+38, 76, 24, 0x1e3a5f, 0.95).setDepth(22).setInteractive({useHandCursor:true});
+    const pitchTx = this.add.text(W/2 + 44, FIELD_Y+FIELD_H+38, `🏈 PITCH (${rbData.spd} SPD)`, {fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#7dd3fc'}).setOrigin(0.5).setDepth(23);
+    const cleanup = () => { keepBg.destroy(); keepTx.destroy(); pitchBg.destroy(); pitchTx.destroy(); };
+    const resolve = (isKeep) => {
+      cleanup();
+      const runner = isKeep ? qbData : rbData;
+      const spdMod = (runner.spd || 80) / 100;
+      const yds = Math.max(-2, Math.round((Math.random() * 14 * spdMod) - 1));
+      const td = state.yardLine + yds >= 100;
+      this._tdFlash(isKeep ? `QB KEEP — ${yds}yds` : `PITCH to RB — ${yds}yds`, isKeep ? '#86efac' : '#7dd3fc');
+      const pid = isKeep ? qbData.id : rbData.id;
+      if (pid) { if(!state.playerStats[pid]) state.playerStats[pid]={}; state.playerStats[pid].rushAtt=(state.playerStats[pid].rushAtt||0)+1; state.playerStats[pid].rushYds=(state.playerStats[pid].rushYds||0)+Math.max(0,yds); if(td)state.playerStats[pid].rushTD=(state.playerStats[pid].rushTD||0)+1; }
+      this._resolvePlay(1.0, 'run', yds, td ? 100 : undefined);
+      this._readOptionActive = false;
+    };
+    keepBg.once('pointerdown', () => resolve(true));
+    pitchBg.once('pointerdown', () => resolve(false));
+    // Auto-resolve if no choice in 3s
+    this.time.delayedCall(3000, () => { if (this._readOptionActive) { cleanup(); resolve(Math.random() < 0.5); } });
+  }
+
+  // ─── P98: QB Kneel ───
+  _startQBKneel() {
+    this.phase = 'result';
+    Sound.whistle?.();
+    this._snapFlash?.();
+    const loss = 1;
+    const W = this.scale.width;
+    const fl = this.add.text(W/2, FIELD_Y+FIELD_H/2-10, '🏈 QB KNEEL — Clock runs', {fontSize:'13px',fontFamily:'monospace',fontStyle:'bold',color:'#60a5fa',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(30);
+    this.time.delayedCall(1200, ()=>fl?.destroy());
+    this._endPlay({ yards:-loss, text:`QB Kneel — -${loss} yd (clock)`, type:'run', turnover:false, td:false });
+  }
+  // ─── P99: Onside Kick Recovery ───
+  _showOnsideKickOption() {
+    if(this.phase!=='result'&&this.phase!=='kickoff')return;
+    const W=this.scale.width,H=this.scale.height;
+    const els=[];const cleanup=()=>els.forEach(e=>e?.destroy?.());
+    const bg=this.add.rectangle(W/2,H/2-10,W,H,0x000000,0.85).setDepth(55);
+    const ht=this.add.text(W/2,H/2-40,'⚡ ONSIDE KICK OPTION',{fontSize:'14px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(56);
+    const sub=this.add.text(W/2,H/2-18,'Trailing by 8+? Try to recover!',{fontSize:'9px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(56);
+    els.push(bg,ht,sub);
+    const mkBtn=(x,label,color,cb)=>{const b=this.add.rectangle(x,H/2+14,110,28,color,1).setDepth(57).setInteractive({useHandCursor:true});const t=this.add.text(x,H/2+14,label,{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(58);els.push(b,t);b.once('pointerdown',()=>{cleanup();cb();});};
+    mkBtn(W/2-64,'ONSIDE KICK',0xef4444,()=>{const rec=Math.random()<0.28;this._tdFlash(rec?'RECOVERED!🏈':'Onside lost…',rec?'#22c55e':'#ef4444');if(rec){state.possession='team';state.yardLine=50;state.down=1;state.toGo=10;state.plays++;if(state.plays%8===0)state.quarter=Math.min(4,state.quarter+1);const hud=this.scene.get('Hud');hud?.events?.emit('possessionChange','team');this.time.delayedCall(1800,()=>{this._resetFormation();this._drawLines();hud?.events?.emit('resetHud');this.scene.launch('PlayCall');this.scene.bringToTop('PlayCall');});}else{this.time.delayedCall(1600,()=>this._startAIDrive());}});
+    mkBtn(W/2+64,'DEEP KICK',0x334155,()=>{ cleanup(); this.time.delayedCall(400,()=>this._launchKickoffReceiver()); });
+    this.time.delayedCall(4000,()=>{cleanup();this.time.delayedCall(400,()=>this._launchKickoffReceiver());});
+  }
   // ─── P89: Blitz Package button ───
   _showBlitzBtn() {
     if (state.possession === 'team') return;
