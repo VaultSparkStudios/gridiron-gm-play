@@ -12,9 +12,17 @@ export class GameOverScene extends Phaser.Scene {
 
     this.add.rectangle(W/2, H/2, W, H, 0x0a0f1a, 0.96);
 
-    this.add.text(W/2, 46, won ? '🏆 VICTORY!' : '❌ DEFEAT', {
-      fontSize:'36px', fontFamily:'monospace', fontStyle:'bold',
-      color:won?'#f59e0b':'#ef4444', stroke:'#000', strokeThickness:4
+    // INNO I19: Comeback win / rivalry win banner
+    const _margin = Math.abs(state.score.team - state.score.opp);
+    const _wasClose = _margin <= 7;
+    const _isRival = state.isRival;
+    const _headerColor = won ? (_isRival?'#f97316':_wasClose?'#fbbf24':'#f59e0b') : '#ef4444';
+    const _headerText = won
+      ? (_isRival ? '⚔️ RIVALRY WIN!' : _wasClose ? '🏆 CLUTCH VICTORY!' : '🏆 VICTORY!')
+      : (_wasClose ? '💔 SO CLOSE...' : '❌ DEFEAT');
+    this.add.text(W/2, 46, _headerText, {
+      fontSize:'34px', fontFamily:'monospace', fontStyle:'bold',
+      color:_headerColor, stroke:'#000', strokeThickness:4
     }).setOrigin(0.5);
 
     const t = state.team?.ab||'YOU', o = state.opponent?.ab||'OPP';
@@ -22,10 +30,17 @@ export class GameOverScene extends Phaser.Scene {
       fontSize:'22px', fontFamily:'monospace', fontStyle:'bold', color:'#f1f5f9'
     }).setOrigin(0.5);
 
+    // Weather & rival badge
+    const _badges=[];
+    if(state.weather&&state.weather!=='clear')_badges.push({txt:state.weather==='snow'?'❄️ SNOW GAME':state.weather==='rain'?'🌧️ RAIN GAME':'💨 WIND',clr:'#93c5fd'});
+    if(_isRival)_badges.push({txt:'⚔️ RIVALRY',clr:'#f97316'});
+    if(_wasClose&&won)_badges.push({txt:'🔥 CLUTCH',clr:'#fbbf24'});
+    if(_badges.length){let bx=W/2-(_badges.length-1)*52;_badges.forEach(b=>{this.add.rectangle(bx,116,96,16,0x1e293b).setStrokeStyle(1,Phaser.Display.Color.HexStringToColor(b.clr).color,0.8);this.add.text(bx,116,b.txt,{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:b.clr}).setOrigin(0.5);bx+=104;});}
+
     // GO2: Play of the Game
     if(state.bestPlay){
-      this.add.text(W/2, 120, `⭐ PLAY OF THE GAME: ${state.bestPlay.name} — ${state.bestPlay.yards}yd ${state.bestPlay.type}`, {
-        fontSize:'10px', fontFamily:'monospace', fontStyle:'bold', color:'#f59e0b', stroke:'#000', strokeThickness:2
+      this.add.text(W/2, 132, `⭐ PLAY OF THE GAME: ${state.bestPlay.name} — ${state.bestPlay.yards}yd ${state.bestPlay.type}`, {
+        fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#f59e0b', stroke:'#000', strokeThickness:2
       }).setOrigin(0.5);
     }
 
@@ -102,8 +117,19 @@ export class GameOverScene extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
+    // INNO I18: Grade distribution summary
+    if(pdelta.length>0){
+      const _grades=pdelta.map(p=>computeGrade(p)).filter(Boolean);
+      const _gcounts={};_grades.forEach(g=>{_gcounts[g]=(_gcounts[g]||0)+1;});
+      const _gradeOrder=['A+','A','B+','B','C','D','F'];
+      const _gSummary=_gradeOrder.filter(g=>_gcounts[g]).map(g=>`${g}×${_gcounts[g]}`).join('  ');
+      if(_gSummary){
+        this.add.text(W/2,374,'TEAM PERFORMANCE',{fontSize:'7px',fontFamily:'monospace',fontStyle:'bold',color:'#334155',letterSpacing:2}).setOrigin(0.5);
+        this.add.text(W/2,386,_gSummary,{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#60a5fa'}).setOrigin(0.5);
+      }
+    }
     // Export notice
-    this.add.text(W/2, 392, '✅ Stats saved — import to Gridiron GM to update your season', {
+    this.add.text(W/2, 400, '✅ Stats saved — import to Gridiron GM to update your season', {
       fontSize:'9px', fontFamily:'monospace', color:'#334155'
     }).setOrigin(0.5);
 

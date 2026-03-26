@@ -1532,7 +1532,8 @@ export class FieldScene extends Phaser.Scene {
     // Broadcast lower-third on big gains (15+ yards, non-TD)
     if (!td && (yards||0) >= 15) {
       const _gainer=isRun?(call==='scramble'?qb:rb):this._lastReceiver;
-      if(_gainer)this._broadcastBanner(`${_gainer.name?.split(' ').pop()} — ${yards} YDS`,'#22c55e');
+      // INNO I11: star player designation for OVR >= 85
+      if(_gainer){const _isStar=(_gainer.ovr||70)>=85;const _nm=_gainer.name?.split(' ').pop()||_gainer.pos;this._broadcastBanner((_isStar?'⭐ ':'')+_nm+' — '+yards+' YDS'+(_isStar&&yards>=20?' 🔥':''),'#22c55e');}
     }
 
     if (isRun) {
