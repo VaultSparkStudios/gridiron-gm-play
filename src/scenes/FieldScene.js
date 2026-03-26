@@ -338,6 +338,36 @@ export class FieldScene extends Phaser.Scene {
 
   // ─── FORMATIONS ───────────────────────────────────────────────────────────
 
+  // FIX P8: centralized per-play flag reset — call from any code path that starts a new play
+  _resetPlayFlags() {
+    this._spinUsed = false;
+    this._holdingRoll = false;
+    this._motionUsed = false;
+    this._hurryUpActive = false;
+    this._qbSneakActive = false;
+    this._fleaFlickerActive = false;
+    this._endAroundActive = false;
+    this._blitzPackage = false;
+    this._readOptionActive = false;
+    this._readOptionChoice = false;
+    this._secondReadActive = false;
+    this._checkdownActive = false;
+    this._jumpRouteActive = false;
+    this._jmpBonus = 0;
+    this._coverageAssignMod = 0;
+    this._returnLaneMod = 0;
+    this._stripBtnShown = false;
+    this._nlPumpBonus = 0;
+    // Destroy transient UI elements
+    this._nlPumpEls?.forEach(e=>e?.destroy?.()); this._nlPumpEls = null;
+    this._jumpRouteEls?.forEach(e=>e?.destroy?.()); this._jumpRouteEls = null;
+    this._stripBtnEl?.forEach(e=>e?.destroy?.()); this._stripBtnEl = null;
+    this._secondReadBtn?.destroy?.(); this._secondReadBtn = null;
+    this._blitzBtn?.destroy?.(); this._blitzBtn = null;
+    this._counterBtn?.destroy?.(); this._counterBtn = null;
+    this._replayBtn?.forEach(e=>e?.destroy()); this._replayBtn = null; this._replayStore = null;
+  }
+
   _resetFormation() {
     const lx = yardToX(state.yardLine), cy = FIELD_Y + FIELD_H / 2;
     // Restore original labels
@@ -363,19 +393,14 @@ export class FieldScene extends Phaser.Scene {
     this.ball.x = this.qb.x; this.ball.y = this.qb.y;
     this.phase = 'presnap';
     this.jukeCD = 0;
-    // P100-P103: clear replay store + btn each play
-    this._replayBtn?.forEach(e=>e?.destroy()); this._replayBtn=null; this._replayStore=null;
-    // P104-P110: reset per-play flags
-    this._stripBtnShown=false; this._stripBtnEl?.forEach(e=>e?.destroy?.()); this._stripBtnEl=null;
-    this._nlPumpEls?.forEach(e=>e?.destroy?.()); this._nlPumpEls=null; this._nlPumpBonus=0;
+    // FIX P8: use centralized flag reset
+    this._resetPlayFlags();
     // P105: Spike button available in 2-min drill
     if(state._drillMode&&state.possession==='team')this.time.delayedCall(100,()=>this._showSpikeBtnDrill());
     // H1: reset play clock each snap
     if(state.possession==='team'){this._playClockMs=40000;this._playClockEl?.setColor('#94a3b8').setText('⏱ 40');}else{this._playClockEl?.setText('');}
     // P82: show DL stunt button when defending; P89: show Blitz Package alongside
     if(state.possession!=='team'){this.time.delayedCall(200,()=>this._showDLStuntBtn());this.time.delayedCall(400,()=>this._showBlitzBtn());}
-    this._spinUsed = false; // P38: reset per play
-    this._holdingRoll = false; // P48: reset per play
     this._audibleActive = this._audibleActive||null; // P45: preserve audible across presnap
     this._clearPassRush();
     this._drawLines();
@@ -1321,6 +1346,8 @@ export class FieldScene extends Phaser.Scene {
       this.phase='result';
       const cdYds=Phaser.Math.Between(1,6);
       this._clearPassRush();
+      // FIX P2: clean up no-look pump fake UI elements on checkdown path
+      this._nlPumpEls?.forEach(e=>e?.destroy?.()); this._nlPumpEls=null; this._nlPumpBonus=0;
       this.recTargets?.forEach(r=>r?.destroy?.());this.recTargets=[];
       this.pressureTxt?.destroy();
       Sound.whistle?.();
@@ -1413,10 +1440,10 @@ export class FieldScene extends Phaser.Scene {
         const _cyBonus=qb.contractYear?0.04:0;
         // Difficulty: veteran/hof AI coverage tightens
         const _diffCovPen=this._diffMod>0?this._diffMod*0.4:0;
-        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen+_confBonus+_cyBonus-_diffCovPen)*wxPassM, 0.22, 0.88);
-        // P64: Hurry-up -5% comp penalty
+        // P64: Hurry-up -5% comp penalty (FIX P1: moved before use to avoid TDZ)
         const _hurryPenalty = this._hurryUpActive ? -0.05 : 0;
         this._hurryUpActive = false;
+        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen+_confBonus+_cyBonus-_diffCovPen)*wxPassM, 0.22, 0.88);
         // P71: motion pre-snap +10% comp on one route
         if(this._motionUsed){compCh=Math.min(0.92,compCh+0.10);this._motionUsed=false;}
         // P54: QB reads modifier
@@ -1693,11 +1720,11 @@ export class FieldScene extends Phaser.Scene {
       this._onPlayCalled._noHuddle=true;
       this.scene.launch('PlayCall');this.scene.bringToTop('PlayCall');
     };
-    mkBtn(W/2-88,'HUDDLE UP','Normal play call',0x334155,launch);
-    mkBtn(W/2+88,'NO HUDDLE 🚀','Defense out of position',0x22c55e,launchNH);
+    // FIX P3: track all created elements so auto-dismiss cleans up buttons too
+    const _nhEls=[bg,t,...mkBtn(W/2-88,'HUDDLE UP','Normal play call',0x334155,launch),...mkBtn(W/2+88,'NO HUDDLE 🚀','Defense out of position',0x22c55e,launchNH)];
     // Auto-dismiss after 3.5s
     this.time.delayedCall(3500,()=>{
-      try{[bg,t].forEach(e=>e.destroy());}catch{}
+      try{_nhEls.forEach(e=>e?.destroy?.());}catch{}
       launch();
     });
   }
