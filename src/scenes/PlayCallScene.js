@@ -61,6 +61,8 @@ export class PlayCallScene extends Phaser.Scene {
       sideline_route:(_d===3&&_t>=3&&state.quarter>=4),
       end_around:  (_d<=2&&_t<=5),
       flea_flicker:(_d===1&&_t>=10),
+      te_seam:     (_d===2&&_t>=5&&_t<=12),
+      wildcat:     (_d<=2&&_t<=4&&state.yardLine>=60),
     };
     const runs   = CALLS.filter(c=>c.cat==='run');
     const passes = CALLS.filter(c=>c.cat==='pass');

@@ -118,10 +118,17 @@ export class HudScene extends Phaser.Scene {
     this.tweens.add({targets:this.resultTxt,alpha:0,duration:1400,delay:600});
     this._onPhaseChange('presnap');
     this._updateYdBar();
-    // Score pop animation on TD / FG
-    if(result.td||result.text?.includes('FG GOOD')){
-      const tgt=result.text?.includes('OPP')||result.turnover?this.scoreTxtO:this.scoreTxtT;
-      this.tweens.add({targets:tgt,scaleX:1.65,scaleY:1.65,duration:160,yoyo:true,ease:'Bounce.easeOut'});
+    // Score bug pulse — flash team color side bar on any scoring play
+    const _scored = result.td || result.text?.includes('FG GOOD') || result.text?.includes('+3') || result.text?.includes('PICK SIX') || result.text?.includes('PAT');
+    if (_scored) {
+      const _isOppScore = result.text?.includes('OPP') || (result.turnover && result.td);
+      const tgt = _isOppScore ? this.scoreTxtO : this.scoreTxtT;
+      this.tweens.add({ targets:tgt, scaleX:1.65, scaleY:1.65, duration:160, yoyo:true, ease:'Bounce.easeOut' });
+      // Flash the side accent bar
+      const tc = _isOppScore ? (state.opponent?.clr||'#ef4444') : (state.team?.clr||'#22c55e');
+      const pulseClr = Phaser.Display.Color.HexStringToColor(tc).color;
+      const pBar = this.add.rectangle(_isOppScore ? this.scale.width-3 : 3, 26, 5, 44, pulseClr, 1).setDepth(25);
+      this.tweens.add({ targets:pBar, alpha:0, duration:600, onComplete:()=>pBar.destroy() });
     }
   }
 

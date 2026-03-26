@@ -54,7 +54,7 @@ export class FieldScene extends Phaser.Scene {
     // P44-P48 flags
     this._audibleUsed = false; this._audibleActive = null; this._audibleBtn = null; this._audibleBtnTxt = null; this._audibleMenuEls = null;
     this._holdingRoll = false; this._squibKickTimer = null; this._bootlegEls = null; this._hmTimer = null;
-    this._momentum = 50; this._momentumBar = null; this._momentumText = null;
+    this._momentum = 50; this._momentumBar = null; this._momentumText = null; // overridden below by streak calc
     this._prePlayState = null;
     // P49-P53 flags
     this._matchupWR1 = 75; this._matchupWR2 = 75; this._matchupEls = [];
@@ -86,6 +86,10 @@ export class FieldScene extends Phaser.Scene {
     this._crowdNoise = false; this._pressureBar = null;
     // Tendency tracker: rolling window of last 6 calls ('run'|'pass') for AI counter-calling
     this._callHistory = [];
+    // Streak → starting momentum (+5 per win streak, -5 per loss streak, capped ±20)
+    this._momentum = clamp(50 + clamp((state.streak||0)*5,-20,20), 30, 70);
+    // Difficulty modifier (affects AI comp%, AI rush speed)
+    this._diffMod = {rookie:-0.12, normal:0, veteran:0.08, hof:0.15}[state.difficulty||'normal']||0;
     // V3: speed trail graphics
     this._trailGfx = this.add.graphics().setDepth(3);
     this._trailPts = [];
@@ -475,6 +479,8 @@ export class FieldScene extends Phaser.Scene {
     state.currentCall = callId;
     // Tendency tracker — record call type for AI counter-calling
     if(callId!=='punt'&&callId!=='fg'){const _ct=(callId.startsWith('run_')||callId==='scramble'||callId==='wildcat'||callId==='end_around'||callId==='qb_sneak')?'run':'pass';this._callHistory.push(_ct);if(this._callHistory.length>6)this._callHistory.shift();}
+    // Snap flash — white pulse radiates from ball on snap
+    if(callId!=='punt'&&callId!=='fg')this._snapFlash();
     // P42: save pre-play state for challenge flag
     this._savePrePlayState();
     // P45: Audible override
@@ -893,7 +899,9 @@ export class FieldScene extends Phaser.Scene {
     // P55: apply fatigue to runner
     if (rb.id) this._applyFatigue(rb.id, runnerPos === 'QB' ? 12 : 8);
     const wxFumM = state.weather==='snow'?1.5:state.weather==='rain'?1.3:1;
-    let fumCh = Math.max(0.02, (0.055 - (rb.str - 70) * 0.0006) * wxFumM);
+    // Chemistry < 50 adds butterfingers: +10% base fumble chance
+    const _chemMul = (state.chemistry||75) < 50 ? 1.10 : 1.0;
+    let fumCh = Math.max(0.02, (0.055 - (rb.str - 70) * 0.0006) * wxFumM * _chemMul);
     if (taps < 2) fumCh = Math.min(0.60, fumCh * 4);
     else if (taps >= 4) fumCh *= 0.25;
     if (Math.random() < fumCh) {
@@ -1159,9 +1167,9 @@ export class FieldScene extends Phaser.Scene {
     if (this.phase !== 'pass_wait') return;
     // P65: show route tree selector
     if(state.possession==='team') this.time.delayedCall(100,()=>this._showRouteTree());
-    // P67: mark checkdown window open for 0.5s after receivers appear
+    // P67: mark checkdown window open for 1.2s after receivers appear
     this._checkdownActive=true;
-    this.time.delayedCall(500,()=>{this._checkdownActive=false;});
+    this.time.delayedCall(1200,()=>{this._checkdownActive=false;});
     const dc = state.opponent?.dcScheme || '4-3';
     const isZone   = dc==='Cover 2' || dc==='Zone Blitz';
     const dbRatings = (state.opponent?.players||[]).filter(p=>['CB','S'].includes(p.pos)).map(p=>p.ovr);
@@ -1240,8 +1248,9 @@ export class FieldScene extends Phaser.Scene {
     this.pressureTxt?.destroy();
     const qteBonus = isOpen ? 1.18+Math.random()*0.18 : 0.38+Math.random()*0.14;
     const sx=this.ball.x, sy=this.ball.y, ex=receiverDot.x, ey=receiverDot.y;
-    // E3: wind drift on deep passes (cross-wind shifts y-landing)
-    const _wdY=(this.passVariant==='deep'&&this._wind&&this._wind.mph>8)?((this._wind.dir==='↑'?-1:this._wind.dir==='↓'?1:0)*(this._wind.mph-8)*1.4):0;
+    // E3: wind drift — full strength on deep, half on medium
+    const _wdMul=this.passVariant==='deep'?1.4:this.passVariant==='medium'?0.7:0;
+    const _wdY=(_wdMul>0&&this._wind&&this._wind.mph>8)?((this._wind.dir==='↑'?-1:this._wind.dir==='↓'?1:0)*(this._wind.mph-8)*_wdMul):0;
     const eyW=ey+_wdY;
     const peakY = Math.min(sy,eyW)-38;
     let t=0; const dur=380;
@@ -1312,7 +1321,13 @@ export class FieldScene extends Phaser.Scene {
         intCh = Math.max(0.01, intCh - defForm.coverageBonus * 0.5);
         // Tendency: AI keys on pass if last 3 calls were all pass — -6% comp
         const _last3t=this._callHistory.slice(-3);const _tendPassPen=(_last3t.length===3&&_last3t.every(c=>c==='pass'))?-0.06:0;
-        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen)*wxPassM, 0.22, 0.88);
+        // p.conf bridge: QB confidence +3% if conf≥75, -5% if conf<40
+        const _confBonus=(qb.conf||60)>=75?0.03:(qb.conf||60)<40?-0.05:0;
+        // Contract year boost: QB in final year of contract +4%
+        const _cyBonus=qb.contractYear?0.04:0;
+        // Difficulty: veteran/hof AI coverage tightens
+        const _diffCovPen=this._diffMod>0?this._diffMod*0.4:0;
+        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen+_confBonus+_cyBonus-_diffCovPen)*wxPassM, 0.22, 0.88);
         // P64: Hurry-up -5% comp penalty
         const _hurryPenalty = this._hurryUpActive ? -0.05 : 0;
         this._hurryUpActive = false;
@@ -1390,9 +1405,20 @@ export class FieldScene extends Phaser.Scene {
       yards=(yards||0)-10;
     }
     const td = state.yardLine + (yards||0) >= 100;
-    if (td)                      { Sound.td();        this._tdFlash('TOUCHDOWN! 🏈','#f59e0b'); state.stats.team.td++; }
+    if (td) {
+      Sound.td(); state.stats.team.td++;
+      // Endorsement activation toast
+      const _scorer=this._lastReceiver||(call==='scramble'?qb:rb);
+      if(_scorer?.endorsed){this._broadcastBanner(`💰 ${_scorer.name?.split(' ').pop()} ENDORSEMENT PAYS OFF!`,'#f59e0b');}
+      else{this._tdFlash('TOUCHDOWN! 🏈','#f59e0b');}
+    }
     else if (yards >= state.toGo){ Sound.firstDown(); }
     else if (!td && yards <= 0)  { Sound.tackle(); }
+    // Broadcast lower-third on big gains (15+ yards, non-TD)
+    if (!td && (yards||0) >= 15) {
+      const _gainer=isRun?(call==='scramble'?qb:rb):this._lastReceiver;
+      if(_gainer)this._broadcastBanner(`${_gainer.name?.split(' ').pop()} — ${yards} YDS`,'#22c55e');
+    }
 
     if (isRun) {
       state.stats.team.rushYds += Math.max(0, yards);
@@ -1727,6 +1753,9 @@ export class FieldScene extends Phaser.Scene {
       this._drawLines();
     }
     const call = this._defCall || 'cover2';
+    // Reset _defSpd to base before applying call modifier (prevents stacking across drives)
+    const _dBase = state.team?.players?.find(p=>p.pos==='QB')||{spd:66};
+    this._defSpd = pxs(_dBase.spd, 90, 1.2);
     if (call === 'man')          { this._defSpd *= 1.22; this._aiRunSpeed *= 1.06; }
     else if (call === 'blitz')   { this._aiRunSpeed *= 1.12; this._launchBlitzPursuer(); }
     else if (call === 'prevent') { this._aiRunSpeed *= 0.84; this._defSpd *= 0.88; }
@@ -1850,7 +1879,8 @@ export class FieldScene extends Phaser.Scene {
     const wxCatchM=state.weather==='snow'?0.80:state.weather==='rain'?0.86:1;
     // P70: apply hurry-up defense modifier (positive = prevent D, negative = aggressive D)
     const hurryMod=this._hurryUpDef||0;
-    const catchCh=Math.min(0.88,Math.max(0.22,(0.58+(wrD.ovr-cbD.ovr)*0.007+bonus+hurryMod)*wxCatchM));
+    // Difficulty: veteran/hof AI gets comp boost; rookie/easy AI gets penalty
+    const catchCh=Math.min(0.88,Math.max(0.22,(0.58+(wrD.ovr-cbD.ovr)*0.007+bonus+hurryMod+(this._diffMod||0)*0.5)*wxCatchM));
     if(Math.random()>catchCh){ Sound.incomplete(); this._resolveAIPlay(0); return; }
     const yards=Math.max(1,Math.round(rec.routeDepth/YARD_W)+Phaser.Math.Between(-1,3));
     state.stats.opp.passYds=(state.stats.opp.passYds||0)+yards;
@@ -2087,19 +2117,40 @@ export class FieldScene extends Phaser.Scene {
     this._qbInjured=false;
     if(this._qbInjEl){this._qbInjEl.destroy();this._qbInjEl=null;}
     state._drillMode=false;
+    // Weather escalation: wind shifts direction/intensity at halftime
+    if(this._wind){const _wdirs=['←','→','↑','↓'];this._wind={dir:_wdirs[Phaser.Math.Between(0,3)],mph:clamp((this._wind.mph||8)+Phaser.Math.Between(-3,5),3,22)};}
     const W=this.scale.width, H=this.scale.height;
     const t=state.team?.ab||'YOU', o=state.opponent?.ab||'OPP';
     const bg=this.add.rectangle(W/2,H/2,W,H,0x0a0f1a,0.96).setDepth(62);
     const ht=this.add.text(W/2,H/2-100,'HALFTIME',{fontSize:'38px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(63);
     const sc=this.add.text(W/2,H/2-46,`${t}  ${state.score.team} — ${state.score.opp}  ${o}`,{fontSize:'26px',fontFamily:'monospace',fontStyle:'bold',color:'#f1f5f9'}).setOrigin(0.5).setDepth(63);
-    const rush=this.add.text(W/2,H/2+8,`Rush: ${state.stats.team.rushYds||0} yds  •  ${state.stats.opp.rushYds||0} yds`,{fontSize:'10px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(63);
-    const tds=this.add.text(W/2,H/2+28,`TDs: ${state.stats.team.td||0}  •  ${state.stats.opp.td||0}`,{fontSize:'10px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(63);
-    const sub=this.add.text(W/2,H/2+68,'2nd Half Kickoff',{fontSize:'11px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(63);
-    const els=[bg,ht,sc,rush,tds,sub];
+    // Halftime comparison bars
+    const _els=[bg,ht,sc];
+    const _barStats=[
+      {lbl:'PASS',tv:state.stats.team.passYds||0,ov:state.stats.opp.passYds||0},
+      {lbl:'RUSH',tv:state.stats.team.rushYds||0,ov:state.stats.opp.rushYds||0},
+      {lbl:'TDs', tv:state.stats.team.td||0,      ov:state.stats.opp.td||0, scale:10},
+    ];
+    _barStats.forEach(({lbl,tv,ov,scale},i)=>{
+      const _max=Math.max(1,tv,ov);const _barMaxW=120;const _y=H/2+14+i*24;
+      this.add.text(W/2-_barMaxW-6,_y,lbl,{fontSize:'8px',fontFamily:'monospace',color:'#334155'}).setOrigin(1,0.5).setDepth(63);
+      // Team bar (left-aligned from center)
+      const _tw=Math.round((tv/_max)*_barMaxW);
+      if(_tw>0){const _tb=this.add.rectangle(W/2-_barMaxW+_tw/2,_y,_tw,10,0x22c55e,0.85).setDepth(63);_els.push(_tb);}
+      this.add.text(W/2-_barMaxW-12,_y,String(tv),{fontSize:'8px',fontFamily:'monospace',color:'#22c55e'}).setOrigin(1,0.5).setDepth(63);
+      // Opp bar (right-aligned from center)
+      const _ow=Math.round((ov/_max)*_barMaxW);
+      if(_ow>0){const _ob=this.add.rectangle(W/2+_barMaxW-_ow/2,_y,_ow,10,0xef4444,0.85).setDepth(63);_els.push(_ob);}
+      this.add.text(W/2+_barMaxW+12,_y,String(ov),{fontSize:'8px',fontFamily:'monospace',color:'#ef4444'}).setOrigin(0,0.5).setDepth(63);
+    });
+    // Wind update badge if changed
+    if(this._wind){const _wEl=this.add.text(W/2,H/2+82,`💨 Wind shifts: ${this._wind.dir} ${this._wind.mph}mph`,{fontSize:'9px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(63);_els.push(_wEl);}
+    const sub=this.add.text(W/2,H/2+98,'2nd Half Kickoff',{fontSize:'11px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(63);
+    _els.push(sub);
     Sound.whistle();
     this.time.delayedCall(4000,()=>{
-      this.tweens.add({targets:els,alpha:0,duration:500,onComplete:()=>{
-        els.forEach(e=>e.destroy());
+      this.tweens.add({targets:_els,alpha:0,duration:500,onComplete:()=>{
+        _els.forEach(e=>e?.destroy?.());
         state.possession='team'; state.down=1; state.toGo=10;
         this._startKickoffReturn();
       }});
@@ -2442,6 +2493,29 @@ export class FieldScene extends Phaser.Scene {
     });
   }
 
+  // Broadcast lower-third: slides up from bottom, persists 2.2s
+  _broadcastBanner(msg, col) {
+    const W=this.scale.width, H=this.scale.height;
+    const bg=this.add.rectangle(W/2,H,W,28,0x050d18,0.92).setDepth(52);
+    const accent=this.add.rectangle(0,H,4,28,Phaser.Display.Color.HexStringToColor(col||'#22c55e').color,1).setDepth(53).setOrigin(0,0.5);
+    const txt=this.add.text(W/2-2,H,'● '+msg,{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:col||'#22c55e',stroke:'#000',strokeThickness:2}).setOrigin(0.5,0.5).setDepth(53);
+    const targetY=H-14;
+    this.tweens.add({targets:[bg,accent,txt],y:targetY,duration:220,ease:'Sine.easeOut',onComplete:()=>{
+      this.time.delayedCall(2200,()=>this.tweens.add({targets:[bg,accent,txt],y:H+20,duration:260,ease:'Sine.easeIn',onComplete:()=>{bg.destroy();accent.destroy();txt.destroy();}}));
+    }});
+  }
+
+  // Snap flash — white pulse from ball position on snap
+  _snapFlash() {
+    const gfx=this.add.graphics().setDepth(49);
+    let r=0;
+    const t=this.time.addEvent({delay:16,loop:true,callback:()=>{
+      r+=4; gfx.clear(); if(r>44){t.remove();gfx.destroy();return;}
+      gfx.lineStyle(2,0xffffff,Math.max(0,0.7-(r/44)*0.7));
+      gfx.strokeCircle(this.ball.x,this.ball.y,r);
+    }});
+  }
+
   // ─── UPDATE LOOP ──────────────────────────────────────────────────────────
 
   update(time, delta) {
@@ -2449,6 +2523,25 @@ export class FieldScene extends Phaser.Scene {
     const dt = delta / 1000;
     // V3: clear trail when not actively running
     if(this.phase!=='run'&&this._trailPts?.length){this._trailPts=[];this._trailGfx?.clear();}
+
+    // Player spotlight — 3 stars under ball carrier if hot game (50+ rush / 120+ pass)
+    if(this.phase==='run'&&this.runner){
+      const _rId=this._runnerData?.id;const _rStats=_rId?state.playerStats[_rId]:null;
+      const _isHot=(_rStats?.rushYds||0)>=50||(_rStats?.passYds||0)>=120;
+      if(_isHot&&!this._spotlightGfx){
+        this._spotlightGfx=this.add.graphics().setDepth(4);
+      }
+      if(this._spotlightGfx){
+        this._spotlightGfx.clear();
+        if(_isHot){
+          this._spotlightGfx.fillStyle(0xfbbf24,0.85);
+          [-8,0,8].forEach(ox=>this._spotlightGfx.fillTriangle(this.runner.x+ox-4,this.runner.y+16,this.runner.x+ox+4,this.runner.y+16,this.runner.x+ox,this.runner.y+11));
+        }
+      }
+    } else if(this._spotlightGfx){this._spotlightGfx.clear();}
+
+    // Field degradation: desaturate grass alpha after 20+ plays
+    if(!this._fieldDegraded&&state.plays>=20){this._fieldDegraded=true;this.tweens.add({targets:this.children.list.filter(c=>c.type==='Rectangle'&&c.y>FIELD_Y&&c.y<FIELD_Y+FIELD_H&&c.fillColor===0x14532d),alpha:0.82,duration:2000});}
 
     // P45: Show audible button during presnap (user possession) — build once, destroy when not presnap
     if(this.phase==='presnap'&&state.possession==='team'&&!this._audibleUsed){

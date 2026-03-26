@@ -46,6 +46,18 @@ export const state = {
 
   // B3: stadium upgrades from GM bridge (e.g. 'crowd_noise')
   stadiumUpgrades: [],
+
+  // Bridge extras
+  difficulty: 'normal',  // 'rookie'|'normal'|'veteran'|'hof'
+  streak: 0,             // win streak (+) / losing streak (-) from GM
+  isRival: false,        // rival matchup flag
+  chemistry: 75,         // team chemistry (affects fumble chance)
+
+  // Internal scene state — declared here so resetState() covers them
+  _halfShown: false,
+  _twoMin1: false,
+  _twoMin2: false,
+  _drillMode: false,
 };
 
 export function resetState() {
@@ -70,9 +82,14 @@ export function resetState() {
   state.gameId = null;
   state.bestPlay = null;
   state.stadiumUpgrades = [];
+  state.difficulty = 'normal';
+  state.streak = 0;
+  state.isRival = false;
+  state.chemistry = 75;
   state._halfShown = false;
   state._twoMin1 = false;
   state._twoMin2 = false;
+  state._drillMode = false;
 }
 
 export function computeGrade(d) {

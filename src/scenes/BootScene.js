@@ -2,17 +2,22 @@ import { loadRoster } from '../data/defaultRoster.js';
 import { state, resetState } from '../data/gameState.js';
 import { track } from '../utils/analytics.js';
 
+
 export class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
 
   create() {
     const W = this.scale.width, H = this.scale.height;
     resetState();
-    const { team, opponent, week, season, gameId, stadiumUpgrades } = loadRoster();
+    const { team, opponent, week, season, gameId, stadiumUpgrades, streak, difficulty, isRival, chemistry } = loadRoster();
     state.team = team;
     state.opponent = opponent;
     state.gameId = gameId || null;
     state.stadiumUpgrades = stadiumUpgrades || [];
+    state.streak = streak || 0;
+    state.difficulty = difficulty || 'normal';
+    state.isRival = isRival || false;
+    state.chemistry = chemistry || 75;
     const wxRoll = Math.random();
     state.weather = wxRoll < 0.60 ? 'clear' : wxRoll < 0.83 ? 'rain' : 'snow';
     track('game_boot', { week: week||0, season: season||0 });
@@ -92,6 +97,25 @@ export class BootScene extends Phaser.Scene {
     this.add.text(W/2, H/2 + 82, wxLabel, {
       fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:wxClr, letterSpacing:3
     }).setOrigin(0.5);
+
+    // Rival intro card
+    if (state.isRival) {
+      const rivBg = this.add.rectangle(W/2, H/2 + 64, W-24, 24, 0xf97316, 0.15).setStrokeStyle(1, 0xf97316, 0.7);
+      this.add.text(W/2, H/2 + 64, '🔥 RIVALRY GAME', {
+        fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#f97316', letterSpacing:3
+      }).setOrigin(0.5);
+      // Pulse the badge
+      this.tweens.add({ targets: rivBg, alpha: 0.06, duration: 700, yoyo: true, repeat: -1 });
+    }
+
+    // Streak badge
+    if (Math.abs(state.streak) >= 2) {
+      const sCol = state.streak > 0 ? '#22c55e' : '#ef4444';
+      const sLbl = state.streak > 0 ? `🔥 W${state.streak} STREAK` : `❄️ L${Math.abs(state.streak)} STREAK`;
+      this.add.text(W/2, H/2 + (state.isRival ? 82 : 64), sLbl, {
+        fontSize:'8px', fontFamily:'monospace', fontStyle:'bold', color: sCol, letterSpacing:2
+      }).setOrigin(0.5);
+    }
 
     // Kick Off button
     const btn = this.add.rectangle(W/2, H/2 + 100, 210, 46, 0x22c55e).setInteractive({ useHandCursor:true });
