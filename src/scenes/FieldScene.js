@@ -37,6 +37,7 @@ export class FieldScene extends Phaser.Scene {
     this._createPlayers();
     this._setupInput();
     this._buildDPad();
+    this._buildTimeoutBtn(); // P101: timeout button
     this.phase = 'presnap';
     this.jukeCD = 0;
     this._pendingPAT = false;
@@ -935,6 +936,7 @@ export class FieldScene extends Phaser.Scene {
       if (injPl && !(state.injuries || []).find(x => x.id === injPl.id)) {
         if (!state.injuries) state.injuries = [];
         state.injuries.push({ id: injPl.id, pos: runnerPos, weeks: Math.floor(Math.random() * 4) + 1 });
+        this._showInjuryFlash(injPl.name.split(' ').pop());
         this._tdFlash(`${injPl.name.split(' ').pop()} INJURED`, '#ef4444');
       }
     }
@@ -1190,6 +1192,7 @@ export class FieldScene extends Phaser.Scene {
       if (qb && !(state.injuries || []).find(x => x.id === qb.id)) {
         if (!state.injuries) state.injuries = [];
         state.injuries.push({ id: qb.id, pos: 'QB', weeks: Math.floor(Math.random() * 3) + 1 });
+        this._showInjuryFlash(qb.name.split(' ').pop());
         this._tdFlash(`${qb.name.split(' ').pop()} INJURED`, '#ef4444');
       }
     }
@@ -1531,6 +1534,8 @@ export class FieldScene extends Phaser.Scene {
   }
 
   _endPlay(result) {
+    // P102: store replay trail on significant plays
+    this._storeReplayTrail(result.yards||0, result.text||'');
     this.kickBlocks?.forEach(b => this._show(b, false));
     this._engagedCvg?.clear();
     // P48: Defensive Holding check — on pass plays, incomplete or short gain
@@ -1803,6 +1808,13 @@ export class FieldScene extends Phaser.Scene {
       this._showGoalLineStand();
       return;
     }
+    // P100: Defensive play call mini-game (once per drive, skip in hurry-up/drill)
+    if(!this._defMiniGameUsed && state.quarter<=4 && !state._drillMode) {
+      this._defMiniGameUsed=true;
+      this._showDefPlayCall(()=>{ this._defMiniGameUsed=false; this._launchAIDrive(); });
+      return;
+    }
+    this._defMiniGameUsed=false;
     this._resetAIFormation();
     // P25: hurry-up offense when AI trails by 7+ in Q4
     const isHurryUp = state.quarter >= 4 && (state.score.opp - state.score.team) >= 7;
@@ -4293,6 +4305,120 @@ export class FieldScene extends Phaser.Scene {
     const decline=()=>{ destroy(); this._tdFlash('❌ PENALTY DECLINED','#ef4444'); this.time.delayedCall(400,()=>this._afterPlay()); };
     aBg.once('pointerdown',accept); dBg.once('pointerdown',decline);
     this.time.delayedCall(3000,()=>{ if(this._penaltyEls.length>0)decline(); });
+  }
+
+  // ─── P100: Defensive Play Call Mini-Game ───
+  _showDefPlayCall(onChoice) {
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const bg=this.add.rectangle(W/2, H/2-20, W*0.92, 100, 0x0f172a, 0.94).setDepth(60).setStrokeStyle(2, 0x3b82f6);
+    const ht=this.add.text(W/2, H/2-58, '🛡️ CALL YOUR DEFENSE', {fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#7dd3fc',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(61);
+    els.push(bg, ht);
+    const calls=[
+      {key:'man',   label:'MAN',     color:0xef4444, bonus:{covB:0.12, sackB:-0.02}, tip:'Tight coverage, pressure risks'},
+      {key:'zone',  label:'ZONE',    color:0x3b82f6, bonus:{covB:0.06, sackB:0.00},  tip:'Balanced — solid vs short routes'},
+      {key:'blitz', label:'BLITZ',   color:0xa78bfa, bonus:{covB:-0.08,sackB:0.08},  tip:'Big sack chance, coverage gaps'},
+      {key:'prevent',label:'PREVENT',color:0x22c55e, bonus:{covB:0.20, sackB:-0.05}, tip:'Bend-don\'t-break, stops deep ball'},
+    ];
+    calls.forEach((c,i)=>{
+      const x=W/2-145+i*96; const y=H/2-14;
+      const rb=this.add.rectangle(x,y,88,26,c.color,0.85).setDepth(62).setInteractive({useHandCursor:true});
+      const rt=this.add.text(x,y,c.label,{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(63);
+      const tp=this.add.text(x,y+20,c.tip,{fontSize:'5px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(63);
+      els.push(rb,rt,tp);
+      rb.once('pointerdown',()=>{
+        this._defMiniGameBonus=c.bonus;
+        this._tdFlash(`${c.label} D called`,`#${c.color.toString(16).padStart(6,'0')}`);
+        els.forEach(e=>e?.destroy());
+        this.time.delayedCall(400,()=>onChoice(c));
+      });
+    });
+    // auto-pick zone after 4s
+    this.time.delayedCall(4000,()=>{
+      if(els[0]?.active){ this._defMiniGameBonus={covB:0.06,sackB:0}; els.forEach(e=>e?.destroy()); onChoice(calls[1]); }
+    });
+  }
+
+  // ─── P101: Timeout Management ───
+  _buildTimeoutBtn() {
+    const W=this.scale.width, H=this.scale.height;
+    if(!this._timeoutsLeft) this._timeoutsLeft=3;
+    if(this._toBtn) return;
+    const bg=this.add.rectangle(W-46, FIELD_Y+FIELD_H+38, 80, 22, 0x1e3a5f, 0.9).setDepth(22).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W-46, FIELD_Y+FIELD_H+38, `⏱️ TO(${this._timeoutsLeft})`, {fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#7dd3fc'}).setOrigin(0.5).setDepth(23);
+    this._toBtn=[bg,tx];
+    const use=()=>{
+      if(this._timeoutsLeft<=0||this.phase==='result'){this._tdFlash('No timeouts left!','#ef4444');return;}
+      this._timeoutsLeft--;
+      tx.setText(`⏱️ TO(${this._timeoutsLeft})`);
+      this._tdFlash('TIMEOUT CALLED — Clock stopped','#7dd3fc');
+      this._toCalledThisPlay=true;
+      // If 4th down, prompt go-for-it or punt
+      if(state.down===4&&state.toGo<=5&&state.possession==='team'){
+        this.time.delayedCall(800,()=>this._show4thDownModal());
+      }
+    };
+    bg.on('pointerdown',use);
+  }
+  _show4thDownModal() {
+    const W=this.scale.width, H=this.scale.height;
+    const els=[];
+    const bg=this.add.rectangle(W/2,H/2-10,W*0.88,76,0x0f172a,0.96).setDepth(64).setStrokeStyle(2,0xf59e0b);
+    const ht=this.add.text(W/2,H/2-42,`4TH & ${state.toGo} — WHAT DO YOU DO?`,{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b'}).setOrigin(0.5).setDepth(65);
+    els.push(bg,ht);
+    const choices=[{l:'GO FOR IT',c:0x22c55e,fn:()=>{this.scene.launch('PlayCall');this.scene.bringToTop('PlayCall');}},{l:'PUNT',c:0xef4444,fn:()=>{state.possession='opp';state.yardLine=Math.max(5,100-state.yardLine-35);state.down=1;state.toGo=10;this._tdFlash('PUNT — field flipped','#94a3b8');this.time.delayedCall(800,()=>this._startAIDrive());}},{l:'FIELD GOAL',c:0x3b82f6,fn:()=>{const dist=state.yardLine;const made=Math.random()<(dist<=30?0.90:dist<=45?0.72:0.48);if(made){state.score.team+=3;this._tdFlash('FIELD GOAL — GOOD! +3','#22c55e');}else this._tdFlash('FG NO GOOD!','#ef4444');state.possession='opp';state.yardLine=Math.max(5,100-state.yardLine);state.down=1;state.toGo=10;this.time.delayedCall(1200,()=>this._startAIDrive());}}];
+    choices.forEach((ch,i)=>{
+      const x=W/2-130+i*130; const y=H/2+8;
+      const rb=this.add.rectangle(x,y,110,24,ch.c,0.9).setDepth(66).setInteractive({useHandCursor:true});
+      const rt=this.add.text(x,y,ch.l,{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(67);
+      els.push(rb,rt);
+      rb.once('pointerdown',()=>{els.forEach(e=>e?.destroy());ch.fn();});
+    });
+    this.time.delayedCall(6000,()=>{ if(els[0]?.active){ els.forEach(e=>e?.destroy()); this.scene.launch('PlayCall'); this.scene.bringToTop('PlayCall'); } });
+  }
+
+  // ─── P102: Replay Engine ───
+  _storeReplayTrail(yards, playText) {
+    if(!this._replayStore) this._replayStore=[];
+    const ballX=this.ball?.x||400; const ballY=this.ball?.y||300;
+    this._replayStore=[{x:ballX-yards*YARD_W, y:ballY},{x:ballX, y:ballY}, playText];
+    if(Math.abs(yards)>=10 || playText?.includes('TD') || playText?.includes('INT')) {
+      this._buildReplayBtn(yards, playText);
+    }
+  }
+  _buildReplayBtn(yards, playText) {
+    this._replayBtn?.forEach(e=>e?.destroy());
+    const W=this.scale.width, H=this.scale.height;
+    const bg=this.add.rectangle(W-46, FIELD_Y+FIELD_H+16, 80, 20, 0x334155, 0.9).setDepth(22).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W-46, FIELD_Y+FIELD_H+16, '▶ REPLAY', {fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#94a3b8'}).setOrigin(0.5).setDepth(23);
+    this._replayBtn=[bg,tx];
+    bg.on('pointerdown',()=>this._runReplay(yards, playText));
+    this.time.delayedCall(5000,()=>{ this._replayBtn?.forEach(e=>e?.destroy()); this._replayBtn=null; });
+  }
+  _runReplay(yards, playText) {
+    if(!this._replayStore) return;
+    const W=this.scale.width, H=this.scale.height;
+    const overlay=this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.6).setDepth(70);
+    const lbl=this.add.text(W/2, FIELD_Y+12, '▶ REPLAY', {fontSize:'9px',fontFamily:'monospace',color:'#60a5fa',stroke:'#000',strokeThickness:1}).setOrigin(0.5).setDepth(71);
+    const playLbl=this.add.text(W/2, H-36, playText||'', {fontSize:'9px',fontFamily:'monospace',color:'#e2e8f0'}).setOrigin(0.5).setDepth(71);
+    const [from, to] = this._replayStore;
+    const dot=this.add.circle(from.x, from.y, 6, 0xf59e0b).setDepth(72);
+    this.tweens.add({targets:dot, x:to.x, y:to.y, duration:900, ease:'Linear', onComplete:()=>{
+      this.time.delayedCall(400,()=>{ overlay?.destroy(); lbl?.destroy(); playLbl?.destroy(); dot?.destroy(); });
+    }});
+  }
+
+  // ─── P103: Injury Flash ───
+  _showInjuryFlash(playerName) {
+    const W=this.scale.width, H=this.scale.height;
+    const flash=this.add.rectangle(W/2,H/2,W,H,0xff0000,0.35).setDepth(80);
+    this.tweens.add({targets:flash,alpha:0,duration:600,onComplete:()=>flash?.destroy()});
+    const lbl=this.add.text(W/2, H/2-20, `🚑 INJURY — ${playerName||'Player Down'}`, {fontSize:'13px',fontFamily:'monospace',fontStyle:'bold',color:'#fca5a5',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(81);
+    // Cart icon (simple rectangle train)
+    const cart=this.add.rectangle(-30, H/2+30, 28, 14, 0xfef3c7).setDepth(81);
+    const cartW=this.add.rectangle(-20, H/2+24, 8, 8, 0xef4444).setDepth(82);
+    this.tweens.add({targets:[cart,cartW], x:`+=${W+60}`, duration:2200, ease:'Linear', onComplete:()=>{ cart?.destroy(); cartW?.destroy(); }});
+    this.time.delayedCall(2500,()=>lbl?.destroy());
   }
 
 }
