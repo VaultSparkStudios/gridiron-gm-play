@@ -134,39 +134,64 @@ export class FieldScene extends Phaser.Scene {
   // ─── FIELD ────────────────────────────────────────────────────────────────
 
   _drawField() {
-    const g = this.add.graphics();
-    g.fillStyle(0x14532d); g.fillRect(FIELD_LEFT, FIELD_Y, 600, FIELD_H);
-    g.lineStyle(1, 0x166534, 0.6);
-    for (let y = 0; y <= 100; y += 10) { const x = yardToX(y); g.lineBetween(x, FIELD_Y, x, FIELD_Y + FIELD_H); }
-    g.lineStyle(1, 0x166534, 0.3);
-    for (let y = 5; y < 100; y += 10) { const x = yardToX(y); g.lineBetween(x, FIELD_Y, x, FIELD_Y + FIELD_H); }
-    g.fillStyle(0x0f3d20);
-    g.fillRect(0, FIELD_Y, FIELD_LEFT, FIELD_H);
-    g.fillRect(FIELD_RIGHT, FIELD_Y, 100, FIELD_H);
-    // E1: team-colored endzone overlays using GM bridge colors
+    const g=this.add.graphics();
+    // === ALTERNATING GRASS STRIPS (10-yard bands like broadcast view) ===
+    for(let i=0;i<10;i++){g.fillStyle(i%2===0?0x14532d:0x165e34,1);g.fillRect(FIELD_LEFT+i*60,FIELD_Y,60,FIELD_H);}
+    // === END ZONES ===
+    g.fillStyle(0x0c3018,1);
+    g.fillRect(0,FIELD_Y,FIELD_LEFT,FIELD_H);
+    g.fillRect(FIELD_RIGHT,FIELD_Y,100,FIELD_H);
+    // === SIDELINES ===
+    g.fillStyle(0xffffff,0.75); g.fillRect(FIELD_LEFT,FIELD_Y,600,2); g.fillRect(FIELD_LEFT,FIELD_Y+FIELD_H-2,600,2);
+    // === HASH MARKS (every 1 yard, at 30% and 70% of field height) ===
+    const _hY1=FIELD_Y+FIELD_H*0.30,_hY2=FIELD_Y+FIELD_H*0.70;
+    g.fillStyle(0xffffff,0.38);
+    for(let y=1;y<100;y++){const hx=yardToX(y);g.fillRect(hx-1,_hY1-3,2,6);g.fillRect(hx-1,_hY2-3,2,6);}
+    // === 5-YARD LINES (minor) ===
+    g.lineStyle(1,0x1a7a3a,0.38);
+    for(let y=5;y<100;y+=10){const x=yardToX(y);g.lineBetween(x,FIELD_Y+2,x,FIELD_Y+FIELD_H-2);}
+    // === 10-YARD LINES (major) ===
+    g.lineStyle(1.5,0xffffff,0.20);
+    for(let y=10;y<=90;y+=10){const x=yardToX(y);g.lineBetween(x,FIELD_Y+2,x,FIELD_Y+FIELD_H-2);}
+    // === GOAL LINES (thick) ===
+    g.lineStyle(3,0xffffff,0.88); g.lineBetween(FIELD_LEFT,FIELD_Y,FIELD_LEFT,FIELD_Y+FIELD_H); g.lineBetween(FIELD_RIGHT,FIELD_Y,FIELD_RIGHT,FIELD_Y+FIELD_H);
+    // === MIDFIELD LINE + CENTER CIRCLE ===
+    const _mfX=yardToX(50);
+    g.lineStyle(2,0xffffff,0.28); g.lineBetween(_mfX,FIELD_Y,_mfX,FIELD_Y+FIELD_H);
+    g.lineStyle(1.5,0xffffff,0.13); g.strokeCircle(_mfX,FIELD_Y+FIELD_H/2,38);
+    // === YARD NUMBERS (top and bottom rows) ===
+    for(let y=10;y<=90;y+=10){
+      const num=y<=50?y:100-y,x=yardToX(y);
+      this.add.text(x,FIELD_Y+18,String(num),{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#ffffff'}).setOrigin(0.5).setAlpha(0.40);
+      this.add.text(x,FIELD_Y+FIELD_H-18,String(num),{fontSize:'12px',fontFamily:'monospace',fontStyle:'bold',color:'#ffffff'}).setOrigin(0.5).setAlpha(0.40);
+    }
+    // === E1: TEAM-COLORED ENDZONES + ABBREVIATED NAMES ===
     const _ezTc=Phaser.Display.Color.HexStringToColor(state.team?.clr||'#22c55e').color;
     const _ezOc=Phaser.Display.Color.HexStringToColor(state.opponent?.clr||'#ef4444').color;
-    this.add.rectangle(50,FIELD_Y+FIELD_H/2,FIELD_LEFT,FIELD_H,_ezTc,0.22).setDepth(0);
-    this.add.rectangle(750,FIELD_Y+FIELD_H/2,100,FIELD_H,_ezOc,0.22).setDepth(0);
-    this.add.text(50,  FIELD_Y + FIELD_H/2, 'END\nZONE', { fontSize:'11px', fontFamily:'monospace', color:'#166534', align:'center' }).setOrigin(0.5);
-    this.add.text(750, FIELD_Y + FIELD_H/2, 'END\nZONE', { fontSize:'11px', fontFamily:'monospace', color:'#166534', align:'center' }).setOrigin(0.5);
-    for (let y = 10; y <= 90; y += 10) {
-      this.add.text(yardToX(y), FIELD_Y + 10, String(y<=50?y:100-y), { fontSize:'9px', fontFamily:'monospace', color:'#166534' }).setOrigin(0.5, 0);
-    }
-    this.losLine      = this.add.graphics();
-    this.firstDownLine = this.add.graphics();
-    this.arcGfx        = this.add.graphics();
-    this.add.text(4, FIELD_Y + FIELD_H + 8,
-      'Offense: WASD / Juke: SPACE / Pass: click receiver  •  Defense: WASD to tackle',
-      { fontSize:'9px', fontFamily:'monospace', color:'#334155' });
-    // P16: Red zone overlay (toggled in _drawLines)
-    this._rzTint = this.add.rectangle(FIELD_RIGHT - 30, FIELD_Y + FIELD_H/2, 62, FIELD_H, 0xef4444, 0.07).setDepth(1).setVisible(false);
-    this._rzIndicator = this.add.text(yardToX(90), FIELD_Y + 22, '◈ RED ZONE', {
-      fontSize:'10px', fontFamily:'monospace', fontStyle:'bold', color:'#ef4444', stroke:'#000', strokeThickness:2
-    }).setOrigin(0.5).setDepth(12).setVisible(false);
+    this.add.rectangle(50,FIELD_Y+FIELD_H/2,FIELD_LEFT,FIELD_H,_ezTc,0.28).setDepth(0);
+    this.add.rectangle(750,FIELD_Y+FIELD_H/2,100,FIELD_H,_ezOc,0.28).setDepth(0);
+    const _tAb=(state.team?.ab||'HOME').toUpperCase(),_oAb=(state.opponent?.ab||'AWAY').toUpperCase();
+    this.add.text(50,FIELD_Y+FIELD_H/2,_tAb,{fontSize:'28px',fontFamily:'monospace',fontStyle:'bold',color:state.team?.clr||'#22c55e'}).setOrigin(0.5).setAlpha(0.38).setAngle(-90).setDepth(0);
+    this.add.text(750,FIELD_Y+FIELD_H/2,_oAb,{fontSize:'28px',fontFamily:'monospace',fontStyle:'bold',color:state.opponent?.clr||'#ef4444'}).setOrigin(0.5).setAlpha(0.38).setAngle(-90).setDepth(0);
+    // Dynamic line graphics
+    this.losLine=this.add.graphics(); this.firstDownLine=this.add.graphics(); this.arcGfx=this.add.graphics();
+    this.add.text(4,FIELD_Y+FIELD_H+8,'Offense: WASD / Juke: SPACE / Pass: click receiver  •  Defense: WASD to tackle',{fontSize:'9px',fontFamily:'monospace',color:'#1e293b'});
+    // P16: Red zone overlay
+    this._rzTint=this.add.rectangle(FIELD_RIGHT-30,FIELD_Y+FIELD_H/2,62,FIELD_H,0xef4444,0.07).setDepth(1).setVisible(false);
+    this._rzIndicator=this.add.text(yardToX(90),FIELD_Y+22,'◈ RED ZONE',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#ef4444',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(12).setVisible(false);
   }
 
-  _createBall() { this.ball = this.add.circle(0, 0, 6, 0xd97706).setDepth(10); }
+  _createBall() {
+    const g=this.add.graphics().setDepth(10);
+    g.fillStyle(0x7a3c10,1); g.fillEllipse(0,0,14,9);          // brown leather oval
+    g.fillStyle(0xa05228,1); g.fillEllipse(-1.5,-1.5,8,5);     // specular highlight
+    g.lineStyle(1,0x3b1c08,0.8); g.strokeEllipse(0,0,14,9);    // seam border
+    g.lineStyle(1.4,0xffffff,0.88);
+    [-2.5,0,2.5].forEach(dx=>g.lineBetween(dx,-3.8,dx,3.8));   // laces
+    g.lineStyle(0.8,0xffffff,0.42);
+    [-1.5,0,1.5].forEach(dy=>g.lineBetween(-3.2,dy,3.2,dy));   // cross-stitch
+    this.ball=g;
+  }
 
   // ─── PLAYERS ──────────────────────────────────────────────────────────────
 
@@ -211,23 +236,53 @@ export class FieldScene extends Phaser.Scene {
     this.puntBlocks.forEach(b=>this._show(b,false));
   }
 
+  // ─── Full top-down football player figure ─────────────────────────────────
   _dot(color, label, radius, ovr) {
-    const g = this.add.graphics();
-    g.fillStyle(color, 1); g.fillCircle(0, 0, radius);
-    // V2: glow ring alpha scales with OVR — elite players glow brighter
-    const ga = ovr ? Math.min(0.9, 0.15+(ovr-60)*0.015) : 0.35;
-    g.lineStyle(2, 0xffffff, ga); g.strokeCircle(0, 0, radius);
-    // V2: gold outer ring for elite players (OVR 85+)
-    if(ovr&&ovr>=85){ g.lineStyle(1.5,0xfbbf24,0.65); g.strokeCircle(0,0,radius+3); }
-    const lbl = this.add.text(0, 0, label, { fontSize:'7px', fontFamily:'monospace', color:'#fff', fontStyle:'bold' }).setOrigin(0.5).setDepth(5);
-    g._lbl = lbl; g._r = radius; g._origLabel = label;
-    g.setDepth(4);
-    return g;
+    const c=this.add.container(0,0).setDepth(4);
+    const g=this.add.graphics();
+    const r=radius;
+    // Shadow
+    g.fillStyle(0x000000,0.28); g.fillEllipse(1.5,2.5,r*1.9,r*2.8);
+    // Jersey / torso
+    g.fillStyle(color,1); g.fillEllipse(0,r*0.45,r*1.28,r*1.55);
+    // Shoulder pads (lightened oval wider than torso)
+    const _lc=Phaser.Display.Color.IntegerToColor(color).lighten(16).color;
+    g.fillStyle(_lc,1); g.fillEllipse(0,-r*0.06,r*1.88,r*0.82);
+    // Jersey side stripes
+    g.lineStyle(1,0xffffff,0.18);
+    g.lineBetween(-r*0.70,r*0.05,-r*0.64,r*0.80);
+    g.lineBetween( r*0.70,r*0.05, r*0.64,r*0.80);
+    // Helmet (darkened, circle at top)
+    const _dc=Phaser.Display.Color.IntegerToColor(color).darken(22).color;
+    g.fillStyle(_dc,1); g.fillCircle(0,-r*0.55,r*0.68);
+    // Helmet shine
+    g.fillStyle(0xffffff,0.20); g.fillEllipse(-r*0.22,-r*0.74,r*0.40,r*0.27);
+    // Facemask bars
+    g.lineStyle(1.2,0xd4dce8,0.78);
+    g.lineBetween(-r*0.44,-r*0.44,r*0.44,-r*0.44);  // lower bar
+    g.lineBetween(-r*0.32,-r*0.58,r*0.32,-r*0.58);  // upper bar
+    g.lineBetween(0,-r*0.42,0,-r*0.34);              // chin bar
+    // OVR aura (V2 preserved + enhanced)
+    if(ovr){
+      const ga=Math.min(0.8,0.10+(ovr-60)*0.011);
+      g.lineStyle(1.5,0xffffff,ga*0.5); g.strokeEllipse(0,r*0.15,r*2.02,r*3.0);
+      if(ovr>=85){g.lineStyle(2,0xfbbf24,0.52);g.strokeEllipse(0,r*0.12,r*2.18,r*3.18);}
+      if(ovr>=92){g.lineStyle(1.5,0xfde68a,0.30);g.strokeEllipse(0,r*0.10,r*2.44,r*3.55);}
+    }
+    // Position label on jersey
+    const lbl=this.add.text(0,r*0.44,label,{
+      fontSize:`${Math.max(5,Math.floor(r*0.60))}px`,
+      fontFamily:'monospace',fontStyle:'bold',color:'#ffffff',
+      stroke:'#00000099',strokeThickness:1.5
+    }).setOrigin(0.5);
+    c.add([g,lbl]);
+    c._lbl=lbl; c._r=r; c._origLabel=label; c._g=g;
+    return c;
   }
 
-  _place(d, x, y) { d.x = x; d.y = y; if (d._lbl) { d._lbl.x = x; d._lbl.y = y; } }
-  _show(d, vis)   { d.setVisible(vis); if (d._lbl) d._lbl.setVisible(vis); }
-  _syncLbl(d)     { if (d._lbl) { d._lbl.x = d.x; d._lbl.y = d.y; } }
+  _place(d, x, y) { d.x=x; d.y=y; if(d.type!=='Container'&&d._lbl){d._lbl.x=x;d._lbl.y=y;} }
+  _show(d, vis)   { d.setVisible(vis); if(d.type!=='Container'&&d._lbl)d._lbl.setVisible(vis); }
+  _syncLbl(d)     { if(d.type!=='Container'&&d._lbl){d._lbl.x=d.x;d._lbl.y=d.y;} }
   // V12: flash ball carrier / receiver last name above their dot
   _flashCarrierName(dot, name) {
     if(!dot||!name)return;
@@ -383,22 +438,25 @@ export class FieldScene extends Phaser.Scene {
 
   _drawLines() {
     this.losLine.clear(); this.firstDownLine.clear();
-    const lx = yardToX(state.yardLine);
-    this.losLine.lineStyle(2, 0xfbbf24, 0.9);
-    this.losLine.lineBetween(lx, FIELD_Y, lx, FIELD_Y + FIELD_H);
-    if (state.possession === 'team') {
-      const fdx = yardToX(Math.min(99, state.yardLine + state.toGo));
-      this.firstDownLine.lineStyle(2, 0x22c55e, 0.7);
-      this.firstDownLine.lineBetween(fdx, FIELD_Y, fdx, FIELD_Y + FIELD_H);
+    const lx=yardToX(state.yardLine);
+    // LOS: thick gold with triangle end-caps
+    this.losLine.lineStyle(3,0xfbbf24,0.88); this.losLine.lineBetween(lx,FIELD_Y,lx,FIELD_Y+FIELD_H);
+    this.losLine.fillStyle(0xfbbf24,0.88);
+    this.losLine.fillTriangle(lx-6,FIELD_Y,lx+6,FIELD_Y,lx,FIELD_Y+11);
+    this.losLine.fillTriangle(lx-6,FIELD_Y+FIELD_H,lx+6,FIELD_Y+FIELD_H,lx,FIELD_Y+FIELD_H-11);
+    if(state.possession==='team'){
+      const fdx=yardToX(Math.min(99,state.yardLine+state.toGo));
+      this.firstDownLine.lineStyle(3,0x22c55e,0.78); this.firstDownLine.lineBetween(fdx,FIELD_Y,fdx,FIELD_Y+FIELD_H);
+      this.firstDownLine.fillStyle(0x22c55e,0.78);
+      this.firstDownLine.fillTriangle(fdx-6,FIELD_Y,fdx+6,FIELD_Y,fdx,FIELD_Y+11);
+      this.firstDownLine.fillTriangle(fdx-6,FIELD_Y+FIELD_H,fdx+6,FIELD_Y+FIELD_H,fdx,FIELD_Y+FIELD_H-11);
     } else {
-      const fdx = yardToX(Math.max(1, state.yardLine - (this.aiToGo || 10)));
-      this.firstDownLine.lineStyle(2, 0xef4444, 0.7);
-      this.firstDownLine.lineBetween(fdx, FIELD_Y, fdx, FIELD_Y + FIELD_H);
+      const fdx=yardToX(Math.max(1,state.yardLine-(this.aiToGo||10)));
+      this.firstDownLine.lineStyle(3,0xef4444,0.78); this.firstDownLine.lineBetween(fdx,FIELD_Y,fdx,FIELD_Y+FIELD_H);
     }
-    // P16: red zone overlay
-    const inRZ = state.possession === 'team' && state.yardLine >= 80;
-    if (this._rzTint) this._rzTint.setVisible(inRZ);
-    if (this._rzIndicator) this._rzIndicator.setVisible(inRZ);
+    const inRZ=state.possession==='team'&&state.yardLine>=80;
+    if(this._rzTint)this._rzTint.setVisible(inRZ);
+    if(this._rzIndicator)this._rzIndicator.setVisible(inRZ);
   }
 
   _clearArc() { this.arcGfx.clear(); }
