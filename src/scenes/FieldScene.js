@@ -85,6 +85,10 @@ export class FieldScene extends Phaser.Scene {
     this._fleaFlickerActive = false; this._endAroundActive = false; this._qbSneakActive = false; this._blitzPackage = false; this._blitzBtn = null;
     // P91-P95 flags
     this._counterBtn = null; this._readOptionActive = false; this._readOptionChoice = false; this._secondReadActive = false; this._secondReadBtn = null; this._driveSummaryShown = false; this._fgIced = false;
+    // P100-P103 flags
+    this._defMiniGameUsed = false; this._replayStore = null; this._replayBtn = null;
+    // P104-P110 flags
+    this._returnLaneMod = 0; this._nlPumpBonus = 0; this._nlPumpEls = null; this._stripBtnShown = false; this._stripBtnEl = null;
     // P96-P97 flags
     this._coverageAssignMod = 0; this._jumpRouteActive = false; this._jumpRouteEls = null;
     this._jmpBonus = 0;
@@ -359,6 +363,13 @@ export class FieldScene extends Phaser.Scene {
     this.ball.x = this.qb.x; this.ball.y = this.qb.y;
     this.phase = 'presnap';
     this.jukeCD = 0;
+    // P100-P103: clear replay store + btn each play
+    this._replayBtn?.forEach(e=>e?.destroy()); this._replayBtn=null; this._replayStore=null;
+    // P104-P110: reset per-play flags
+    this._stripBtnShown=false; this._stripBtnEl?.forEach(e=>e?.destroy?.()); this._stripBtnEl=null;
+    this._nlPumpEls?.forEach(e=>e?.destroy?.()); this._nlPumpEls=null; this._nlPumpBonus=0;
+    // P105: Spike button available in 2-min drill
+    if(state._drillMode&&state.possession==='team')this.time.delayedCall(100,()=>this._showSpikeBtnDrill());
     // H1: reset play clock each snap
     if(state.possession==='team'){this._playClockMs=40000;this._playClockEl?.setColor('#94a3b8').setText('⏱ 40');}else{this._playClockEl?.setText('');}
     // P82: show DL stunt button when defending; P89: show Blitz Package alongside
@@ -483,7 +494,7 @@ export class FieldScene extends Phaser.Scene {
   _onPlayCalled(callId) {
     state.currentCall = callId;
     // Tendency tracker — record call type for AI counter-calling
-    if(callId!=='punt'&&callId!=='fg'){const _ct=(callId.startsWith('run_')||callId==='scramble'||callId==='wildcat'||callId==='end_around'||callId==='qb_sneak')?'run':'pass';this._callHistory.push(_ct);if(this._callHistory.length>6)this._callHistory.shift();}
+    if(callId!=='punt'&&callId!=='fg'){const _ct=(callId.startsWith('run_')||callId==='scramble'||callId==='wildcat'||callId==='end_around'||callId==='qb_sneak'||callId==='read_option')?'run':'pass';this._callHistory.push(_ct);if(this._callHistory.length>6)this._callHistory.shift();}
     // Snap flash — white pulse radiates from ball on snap
     if(callId!=='punt'&&callId!=='fg')this._snapFlash();
     // P42: save pre-play state for challenge flag
@@ -546,6 +557,8 @@ export class FieldScene extends Phaser.Scene {
     else if (callId === 'qb_sneak')                                       this._startQBSneak();
     else if (callId === 'read_option')                                    this._startReadOption();
     else if (callId === 'qb_kneel')                                       this._startQBKneel();
+    else if (callId === 'crossing_route')                                  this._startCrossingRoute();
+    else if (callId === 'wr_bubble')                                       this._startWRBubble();
     else if (callId === 'pass_action')                                    this._startPlayAction();
     else if (callId.startsWith('pass_')) {
       // P44: Hail Mary on 4th & long from deep in own territory
@@ -962,6 +975,8 @@ export class FieldScene extends Phaser.Scene {
     this.events.emit('phaseChange', 'pass');
     // P84: Show pump fake button briefly on pass plays
     if(state.possession==='team')this._showPumpFakeBtn(()=>{});
+    // P106: No-look pump fake — appears 250ms after snap
+    if(state.possession==='team')this.time.delayedCall(250,()=>this._showNoLookPump());
     // P54: Show QB reads overlay before receivers are clickable
     if (state.possession === 'team') { this._qbReadsActive = true; this._showQBReads(); }
     this.time.delayedCall(isAction ? 850 : 550, () => this._buildReceiverTargets(isAction));
@@ -1039,6 +1054,8 @@ export class FieldScene extends Phaser.Scene {
           const dx = this.qb.x - rusher.x, dy = this.qb.y - rusher.y;
           const dist = Math.sqrt(dx*dx + dy*dy);
           if (dist < 14) { this._sack(); return; }
+          // P108: Strip-sack button when DL closes within 35px
+          if(dist<35&&!this._stripBtnShown){this._stripBtnShown=true;this._showStripBtn();}
 
           // Block effect: nearly stop rusher if pocket blocker is in contact
           let spd = freeSpd;
@@ -1411,6 +1428,8 @@ export class FieldScene extends Phaser.Scene {
         if (audibleRoute) { compCh = clamp(compCh + audibleRoute.passBonus, 0.10, 0.92); }
         // P84: pump fake bonus +10% comp
         if(this._pumpFakeBonus){compCh=Math.min(0.92,compCh+this._pumpFakeBonus);this._pumpFakeBonus=0;}
+        // P106: no-look pump fake bonus +14% comp
+        if(this._nlPumpBonus){compCh=Math.min(0.92,compCh+this._nlPumpBonus);this._nlPumpBonus=0;}
         // P82: DL stunt — opponent sack bonus (only applies when opp has possession)
         if(this._dlStunt&&state.possession!=='team'){intCh=Math.min(0.30,intCh+0.08);this._dlStunt=false;}
         // P89: Blitz package — higher INT/sack but risky if broken
@@ -2287,7 +2306,7 @@ export class FieldScene extends Phaser.Scene {
     this._audibleMenuShown=false; this._activeAudible=null;
     const catchYard = Phaser.Math.Between(8,14);
     state.yardLine = catchYard; state.down=1; state.toGo=10; state.possession='team';
-    this._showKickoffFlash('KICKOFF RETURN','WASD to return  •  SPACE to juke',()=>this._launchKickoffReturn(catchYard));
+    this._showReturnLaneChoice(catchYard);
   }
 
   _launchKickoffReturn(catchYard) {
@@ -2351,7 +2370,7 @@ export class FieldScene extends Phaser.Scene {
     // P47: Squib kick option
     mkBtn(W/2-165,H/2+10,'KICK DEEP','Normal kickoff',0x22c55e,()=>this._startKickoffCover());
     mkBtn(W/2,H/2+10,'SQUIB KICK','Opp ball at 30',0x64748b,()=>this._doSquibKick());
-    mkBtn(W/2+165,H/2+10,'ONSIDE','~15% recovery',0xf59e0b,()=>this._resolveOnsideKick());
+    mkBtn(W/2+165,H/2+10,'ONSIDE','~15% recovery',0xf59e0b,()=>this._showOnsideDirectionChoice());
     // P47: auto-dismiss to deep kick after 3s
     let rem=3000;const cdEl=this.add.text(W/2,H/2+56,'Auto: 3s',{fontSize:'9px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);els.push(cdEl);
     const tick=()=>{rem-=200;if(rem<=0){cleanup();this._startKickoffCover();return;}cdEl.setText('Auto: '+(rem/1000).toFixed(1)+'s');this._squibKickTimer=setTimeout(tick,200);};
@@ -2372,10 +2391,10 @@ export class FieldScene extends Phaser.Scene {
   }
 
   // P21: Resolve onside kick attempt — P37 enhanced with rapid-tap mechanic
-  _resolveOnsideKick() {
+  _resolveOnsideKick(dirBonus=0) {
     const W = this.scale.width, H = this.scale.height;
     const stOvr = state.team?.players?.filter(p=>p.pos==='K').reduce((s,p,_,a)=>s+p.ovr/a.length,0)||70;
-    const baseRecoverCh = Math.min(0.28, 0.10 + (stOvr-60)*0.002);
+    const baseRecoverCh = Math.min(0.28, 0.10 + (stOvr-60)*0.002) + dirBonus;
     let taps = 0; const els = [];
     els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(60));
     els.push(this.add.text(W/2,H/2-60,'ONSIDE KICK! TAP FAST!',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(61));
@@ -4419,6 +4438,153 @@ export class FieldScene extends Phaser.Scene {
     const cartW=this.add.rectangle(-20, H/2+24, 8, 8, 0xef4444).setDepth(82);
     this.tweens.add({targets:[cart,cartW], x:`+=${W+60}`, duration:2200, ease:'Linear', onComplete:()=>{ cart?.destroy(); cartW?.destroy(); }});
     this.time.delayedCall(2500,()=>lbl?.destroy());
+  }
+
+  // ─── P104: KO Return Lane Choice ───────────────────────────────────────────
+  _showReturnLaneChoice(catchYard) {
+    const W=this.scale.width, H=this.scale.height;
+    const els=[]; const cleanup=()=>{clearTimeout(this._rlTimer);els.forEach(e=>e?.destroy?.());};
+    const mods=[{label:'◀ LEFT',sub:'Outside sweep',ydMod:3,clr:0x22c55e},{label:'MIDDLE',sub:'Up the gut',ydMod:0,clr:0x3b82f6},{label:'RIGHT ▶',sub:'Cut inside',ydMod:1,clr:0xf59e0b}].sort(()=>Math.random()-.5);
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.80).setDepth(60));
+    els.push(this.add.text(W/2,H/2-68,'⬆ PICK YOUR RETURN LANE',{fontSize:'14px',fontFamily:'monospace',fontStyle:'bold',color:'#f1f5f9',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(61));
+    mods.forEach((m,i)=>{
+      const cx=W/2+(i-1)*155, cy=H/2+10;
+      const b=this.add.rectangle(cx,cy,140,56,0x0d1424).setDepth(61).setStrokeStyle(2,m.clr,0.7).setInteractive({useHandCursor:true});
+      const lbl=this.add.text(cx,cy-10,m.label,{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#'+m.clr.toString(16).padStart(6,'0')}).setOrigin(0.5).setDepth(62);
+      const sub=this.add.text(cx,cy+10,m.sub,{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(62);
+      b.on('pointerover',()=>b.setFillStyle(m.clr,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{cleanup();this._showKickoffFlash('KICKOFF RETURN',`${m.label} — WASD to run!`,()=>this._launchKickoffReturn(catchYard+m.ydMod));});
+      els.push(b,lbl,sub);
+    });
+    let _ar=4000;const _ael=this.add.text(W/2,H/2+60,'Auto: 4s',{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(61);els.push(_ael);
+    const _atk=()=>{_ar-=200;if(_ar<=0){cleanup();this._showKickoffFlash('KICKOFF RETURN','WASD to return!',()=>this._launchKickoffReturn(catchYard));return;}_ael.setText('Auto: '+(_ar/1000).toFixed(1)+'s');this._rlTimer=setTimeout(_atk,200);};
+    this._rlTimer=setTimeout(_atk,200);
+  }
+
+  // ─── P105: 2-Min Drill Spike Button ────────────────────────────────────────
+  _showSpikeBtnDrill() {
+    if(!state._drillMode||this.phase!=='presnap')return;
+    const W=this.scale.width;
+    const bg=this.add.rectangle(W/2-66,FIELD_Y+FIELD_H+38,84,22,0x1e293b).setDepth(23).setStrokeStyle(1,0xef4444,0.8).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W/2-66,FIELD_Y+FIELD_H+38,'⏰ SPIKE',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#ef4444'}).setOrigin(0.5).setDepth(24);
+    const els=[bg,tx]; const cleanup=()=>els.forEach(e=>e?.destroy?.());
+    bg.on('pointerdown',()=>{if(this.phase!=='presnap')return;cleanup();this.phase='result';this._tdFlash('QB SPIKE! Clock stopped!','#ef4444');this._endPlay({yards:0,text:'QB spike — clock stopped.',type:'incomplete',turnover:false,td:false});});
+    this.time.delayedCall(5000,()=>cleanup());
+  }
+
+  // ─── P106: No-Look Pump Fake ────────────────────────────────────────────────
+  _showNoLookPump() {
+    if(this.phase!=='pass_wait')return;
+    const W=this.scale.width;
+    const bg=this.add.rectangle(W/2+92,FIELD_Y+FIELD_H+38,88,22,0x1e293b).setDepth(23).setStrokeStyle(1,0xa78bfa,0.8).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W/2+92,FIELD_Y+FIELD_H+38,'👁 NO LOOK',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#a78bfa'}).setOrigin(0.5).setDepth(24);
+    this._nlPumpEls=[bg,tx]; const cleanup=()=>{this._nlPumpEls?.forEach(e=>e?.destroy?.());this._nlPumpEls=null;};
+    bg.on('pointerdown',()=>{
+      if(this.phase!=='pass_wait')return; cleanup(); this._nlPumpBonus=0.14;
+      this._tdFlash('NO LOOK!','#a78bfa');
+      if(this.cb1)this.tweens.add({targets:this.cb1,x:this.wr1.x-20,y:this.wr1.y,duration:400,ease:'Linear'});
+    });
+    this.time.delayedCall(900,()=>cleanup());
+  }
+
+  // ─── P107: Crossing Route ───────────────────────────────────────────────────
+  _startCrossingRoute() {
+    const W=this.scale.width, H=this.scale.height;
+    this.phase='pass_wait'; this.passVariant='medium';
+    this.events.emit('phaseChange','pass'); Sound.whistle?.();
+    this._setupPocket(); this._startPassRush(false);
+    const teData=state.team?.players?.find(p=>p.pos==='TE')||{ovr:74,spd:72,id:'te1'};
+    const cy=FIELD_Y+FIELD_H/2;
+    this.tweens.add({targets:this.te,x:this.te.x+95,y:cy-20,duration:480,ease:'Sine.out',onUpdate:()=>this._syncLbl(this.te)});
+    this.tweens.add({targets:this.lb,x:this.lb.x+55,y:cy,duration:540,ease:'Sine.out',onUpdate:()=>this._syncLbl(this.lb)});
+    this.time.delayedCall(500,()=>{
+      if(this.phase!=='pass_wait')return;
+      const bg=this.add.rectangle(W/2,FIELD_Y+FIELD_H+24,80,24,0x22c55e,0.9).setDepth(23).setInteractive({useHandCursor:true});
+      const tx=this.add.text(W/2,FIELD_Y+FIELD_H+24,'🏈 THROW!',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(24);
+      const els=[bg,tx]; const cleanup=()=>els.forEach(e=>e?.destroy?.());
+      bg.on('pointerdown',()=>{
+        if(this.phase!=='pass_wait')return; cleanup(); this.phase='pass_flight'; this._clearPassRush();
+        this.recTargets?.forEach(r=>r?.destroy?.()); this.recTargets=[];
+        const lbOvr=(state.opponent?.players?.find(p=>p.pos==='LB')||{ovr:76}).ovr;
+        const compCh=clamp(0.62+(teData.ovr-70)*0.006-(lbOvr-70)*0.004,0.30,0.84);
+        const caught=Math.random()<compCh; const isINT=!caught&&Math.random()<0.08;
+        const yds=caught?Phaser.Math.Between(7,14):0;
+        if(caught){this._flashCarrierName(this.te,teData.name?.split(' ').pop()||'TE');}
+        const txt=caught?`Crossing route — TE for ${yds} yards${yds+state.yardLine>=100?' TD!':''}`:isINT?'INTERCEPTION! LB jumps the cross!':'Crossing route — incomplete';
+        this.time.delayedCall(400,()=>this._endPlay({yards:caught?yds:0,text:txt,type:caught?'pass':'incomplete',turnover:isINT,td:caught&&yds+state.yardLine>=100}));
+      });
+      this.time.delayedCall(2500,()=>{if(this.phase==='pass_wait'){cleanup();this.phase='pass_flight';this._clearPassRush();this.recTargets?.forEach(r=>r?.destroy?.());this.recTargets=[];this.time.delayedCall(200,()=>this._endPlay({yards:0,text:'Cross route — sacked off pressure',type:'incomplete',turnover:false,td:false}));}});
+    });
+  }
+
+  // ─── P108: Defensive Strip-Sack Button ─────────────────────────────────────
+  _showStripBtn() {
+    if(this.phase!=='pass_wait')return;
+    const W=this.scale.width;
+    const bg=this.add.rectangle(W-78,FIELD_Y+FIELD_H+60,76,22,0x7f1d1d,0.9).setDepth(23).setStrokeStyle(1,0xef4444,0.8).setInteractive({useHandCursor:true});
+    const tx=this.add.text(W-78,FIELD_Y+FIELD_H+60,'💥 STRIP!',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fca5a5'}).setOrigin(0.5).setDepth(24);
+    this._stripBtnEl=[bg,tx]; const cleanup=()=>{this._stripBtnEl?.forEach(e=>e?.destroy?.());this._stripBtnEl=null;};
+    bg.on('pointerdown',()=>{
+      if(this.phase!=='pass_wait')return; cleanup();
+      if(Math.random()<0.22){
+        this.phase='result';this._clearPassRush();this.recTargets?.forEach(r=>r?.destroy?.());this.recTargets=[];
+        this._tdFlash('FORCED FUMBLE!','#ef4444');
+        this.time.delayedCall(600,()=>this._endPlay({yards:-3,text:'STRIP-SACK! Defense forces fumble!',type:'fumble',turnover:true,td:false}));
+      }else{this._tdFlash('Strip attempt failed','#64748b');}
+    });
+    this.time.delayedCall(800,()=>cleanup());
+  }
+
+  // ─── P109: WR Bubble Screen ─────────────────────────────────────────────────
+  _startWRBubble() {
+    const W=this.scale.width, H=this.scale.height;
+    this.phase='pass_wait'; this.passVariant='quick';
+    this.events.emit('phaseChange','pass'); Sound.whistle?.();
+    const wr1Data=state.team?.players?.find(p=>p.pos==='WR')||{ovr:80,spd:88,id:'wr1'};
+    const cbOvr=(state.opponent?.players?.filter(p=>p.pos==='CB')[0]||{ovr:75}).ovr;
+    this.tweens.add({targets:this.wr1,y:this.wr1.y-46,x:this.wr1.x+28,duration:340,ease:'Sine.out',onUpdate:()=>this._syncLbl(this.wr1)});
+    this.time.delayedCall(400,()=>{
+      if(this.phase!=='pass_wait')return;
+      const cuts=[{label:'CUT IN',yds:[4,9]},{label:'STRAIGHT',yds:[2,6]},{label:'CUT OUT',yds:[5,13]}];
+      const els=[]; const cleanup=()=>els.forEach(e=>e?.destroy?.());
+      cuts.forEach((c,i)=>{
+        const cx=W/2+(i-1)*118, cy=H-46;
+        const b=this.add.rectangle(cx,cy,108,32,0x0d1424).setDepth(26).setStrokeStyle(1,0x3b82f6,0.8).setInteractive({useHandCursor:true});
+        const lt=this.add.text(cx,cy,c.label,{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#7dd3fc'}).setOrigin(0.5).setDepth(27);
+        els.push(b,lt);
+        b.on('pointerover',()=>b.setFillStyle(0x3b82f6,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+        b.on('pointerdown',()=>{
+          if(this.phase!=='pass_wait')return; cleanup(); this.phase='result';
+          const compCh=clamp(0.70+(wr1Data.spd-75)*0.005-(cbOvr-70)*0.004,0.35,0.88);
+          const caught=Math.random()<compCh; const yds=caught?Phaser.Math.Between(...c.yds):0;
+          const txt=caught?`WR bubble — ${c.label} for ${yds} yards`:'WR bubble — knocked away';
+          if(caught)this._flashCarrierName(this.wr1,wr1Data.name?.split(' ').pop()||'WR');
+          this.time.delayedCall(300,()=>this._endPlay({yards:yds,text:txt,type:caught?'pass':'incomplete',turnover:false,td:yds+state.yardLine>=100}));
+        });
+      });
+      this.time.delayedCall(3500,()=>{if(this.phase==='pass_wait'){cleanup();this.phase='result';this.time.delayedCall(200,()=>this._endPlay({yards:0,text:'WR bubble — pressure disrupts the throw',type:'incomplete',turnover:false,td:false}));}});
+    });
+  }
+
+  // ─── P110: Onside Direction Choice ─────────────────────────────────────────
+  _showOnsideDirectionChoice() {
+    const W=this.scale.width, H=this.scale.height;
+    const _mods=([0.08,0.01,-0.04]).sort(()=>Math.random()-.5);
+    const _dirs=[{label:'◀ LEFT',mod:_mods[0]},{label:'CENTER',mod:_mods[1]},{label:'RIGHT ▶',mod:_mods[2]}];
+    const els=[]; const cleanup=()=>{clearTimeout(this._odTimer);els.forEach(e=>e?.destroy?.());};
+    els.push(this.add.rectangle(W/2,H/2,W,H,0x000000,0.82).setDepth(62));
+    els.push(this.add.text(W/2,H/2-64,'⚡ ONSIDE KICK DIRECTION',{fontSize:'14px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(63));
+    _dirs.forEach((d,i)=>{
+      const cx=W/2+(i-1)*136, cy=H/2+10;
+      const b=this.add.rectangle(cx,cy,124,52,0x0d1424).setDepth(63).setStrokeStyle(2,0xf59e0b,0.7).setInteractive({useHandCursor:true});
+      const lt=this.add.text(cx,cy,d.label,{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b'}).setOrigin(0.5).setDepth(64);
+      els.push(b,lt);
+      b.on('pointerover',()=>b.setFillStyle(0xf59e0b,0.18));b.on('pointerout',()=>b.setFillStyle(0x0d1424,1));
+      b.on('pointerdown',()=>{cleanup();this._resolveOnsideKick(d.mod);});
+    });
+    let _ar=3000;const _ael=this.add.text(W/2,H/2+52,'Auto: 3s',{fontSize:'8px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(63);els.push(_ael);
+    const _atk=()=>{_ar-=200;if(_ar<=0){cleanup();this._resolveOnsideKick(0);return;}_ael.setText('Auto: '+(_ar/1000).toFixed(1)+'s');this._odTimer=setTimeout(_atk,200);};
+    this._odTimer=setTimeout(_atk,200);
   }
 
 }

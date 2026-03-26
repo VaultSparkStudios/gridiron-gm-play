@@ -18,6 +18,9 @@ const CALLS = [
   { id:'flea_flicker',   label:'Flea Flicker',   cat:'pass', tip:'Handoff → pitch back → deep' },
   // P98
   { id:'qb_kneel',       label:'QB Kneel',       cat:'run',  tip:'Lose 1 yd — kills clock' },
+  // P107 / P109
+  { id:'crossing_route', label:'Cross Route',    cat:'pass', tip:'TE cuts across — LB gap' },
+  { id:'wr_bubble',      label:'WR Bubble',      cat:'pass', tip:'Quick flat — block develops' },
 ];
 
 export class PlayCallScene extends Phaser.Scene {
@@ -65,7 +68,9 @@ export class PlayCallScene extends Phaser.Scene {
       end_around:  (_d<=2&&_t<=5),
       flea_flicker:(_d===1&&_t>=10),
       te_seam:     (_d===2&&_t>=5&&_t<=12),
-      wildcat:     (_d<=2&&_t<=4&&state.yardLine>=60),
+      wildcat:       (_d<=2&&_t<=4&&state.yardLine>=60),
+      crossing_route:(_d===2&&_t>=5&&_t<=12)||(_d===3&&_t>=3&&_t<=8),
+      wr_bubble:     (_d===3&&_t>=2&&_t<=7),
     };
     const runs   = CALLS.filter(c=>c.cat==='run');
     const passes = CALLS.filter(c=>c.cat==='pass');
