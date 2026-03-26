@@ -54,6 +54,9 @@ export const state = {
   isRival: false,        // rival matchup flag
   chemistry: 75,         // team chemistry (affects fumble chance)
 
+  // INNO I29: play call history — last N calls for PlayCallScene sidebar
+  callHistory: [],
+
   // Internal scene state — declared here so resetState() covers them
   _halfShown: false,
   _twoMin1: false,
@@ -88,6 +91,7 @@ export function resetState() {
   state.streak = 0;
   state.isRival = false;
   state.chemistry = 75;
+  state.callHistory = [];
   state._halfShown = false;
   state._twoMin1 = false;
   state._twoMin2 = false;

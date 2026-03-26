@@ -89,32 +89,33 @@ export class GameOverScene extends Phaser.Scene {
       });
     }
 
+    // MVP badge — top performer by total yards
+    const _mvp = pdelta.length ? [...pdelta].sort((a,b)=>((b.passYds||0)+(b.rushYds||0)+(b.recYds||0))-((a.passYds||0)+(a.rushYds||0)+(a.recYds||0)))[0] : null;
+    if(_mvp){
+      const _mvpYds=((_mvp.passYds||0)+(_mvp.rushYds||0)+(_mvp.recYds||0));
+      const _mvpTd=_mvp.td?` ${_mvp.td}TD`:'';
+      this.add.rectangle(W/2,250,W-20,18,0x1e3a5f,0.55).setDepth(1).setStrokeStyle(1,0x3b82f6,0.5);
+      this.add.text(W/2,250,`⭐ MVP: ${_mvp.name} (${_mvp.pos}) — ${_mvpYds}yds${_mvpTd}`,{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#7dd3fc'}).setOrigin(0.5);
+    }
+
     // Drive chart — GO3: horizontal bar chart (width=yards gained, color=result)
+    // Capped at 6 drives per side to avoid overlap with buttons
     if (state.drives && state.drives.length) {
-      this.add.text(W/2, 348, 'DRIVE CHART', { fontSize:'7px', fontFamily:'monospace', fontStyle:'bold', color:'#334155', letterSpacing:3 }).setOrigin(0.5);
+      this.add.text(W/2, 264, 'DRIVE CHART', { fontSize:'7px', fontFamily:'monospace', fontStyle:'bold', color:'#334155', letterSpacing:3 }).setOrigin(0.5);
       const maxYd = Math.max(1, ...state.drives.map(d=>d.yards||1));
       let tRow=0, oRow=0;
-      state.drives.slice(0,10).forEach(d => {
+      state.drives.slice(0,12).forEach(d => {
         const isTeam = d.poss==='team';
+        if(isTeam && tRow>=6) return;
+        if(!isTeam && oRow>=6) return;
         const row = isTeam ? tRow++ : oRow++;
         const x = isTeam ? W/2-190 : W/2+10;
         const clrH = (d.result==='TD'||d.result==='FG') ? 0x22c55e : (d.result==='INT'||d.result==='FUM') ? 0xef4444 : 0x475569;
         const clrT = (d.result==='TD'||d.result==='FG') ? '#22c55e' : (d.result==='INT'||d.result==='FUM') ? '#ef4444' : '#475569';
         const barW = Math.max(4, Math.round((d.yards||0)/maxYd*174));
-        this.add.rectangle(x+barW/2, 358+row*13, barW, 7, clrH, 0.75).setOrigin(0.5);
-        this.add.text(x, 358+row*13+1, `${d.yards||0}yd→${d.result}`, { fontSize:'7px', fontFamily:'monospace', color:clrT });
+        this.add.rectangle(x+barW/2, 274+row*13, barW, 7, clrH, 0.75).setOrigin(0.5);
+        this.add.text(x, 274+row*13+1, `${d.yards||0}yd→${d.result}`, { fontSize:'7px', fontFamily:'monospace', color:clrT });
       });
-    }
-
-    // Injury report
-    if (state.injuries && state.injuries.length > 0) {
-      const injNames = state.injuries.map(i => {
-        const pl = state.team?.players?.find(p => p.id === i.id);
-        return `${pl?.name?.split(' ').pop() || i.pos} (${i.weeks}wk)`;
-      }).join(', ');
-      this.add.text(W/2, 376, `🚑 INJURED: ${injNames}`, {
-        fontSize:'9px', fontFamily:'monospace', color:'#ef4444'
-      }).setOrigin(0.5);
     }
 
     // INNO I18: Grade distribution summary
@@ -124,10 +125,22 @@ export class GameOverScene extends Phaser.Scene {
       const _gradeOrder=['A+','A','B+','B','C','D','F'];
       const _gSummary=_gradeOrder.filter(g=>_gcounts[g]).map(g=>`${g}×${_gcounts[g]}`).join('  ');
       if(_gSummary){
-        this.add.text(W/2,374,'TEAM PERFORMANCE',{fontSize:'7px',fontFamily:'monospace',fontStyle:'bold',color:'#334155',letterSpacing:2}).setOrigin(0.5);
-        this.add.text(W/2,386,_gSummary,{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#60a5fa'}).setOrigin(0.5);
+        this.add.text(W/2,359,'TEAM PERFORMANCE',{fontSize:'7px',fontFamily:'monospace',fontStyle:'bold',color:'#334155',letterSpacing:2}).setOrigin(0.5);
+        this.add.text(W/2,370,_gSummary,{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#60a5fa'}).setOrigin(0.5);
       }
     }
+
+    // Injury report
+    if (state.injuries && state.injuries.length > 0) {
+      const injNames = state.injuries.map(i => {
+        const pl = state.team?.players?.find(p => p.id === i.id);
+        return `${pl?.name?.split(' ').pop() || i.pos} (${i.weeks}wk)`;
+      }).join(', ');
+      this.add.text(W/2, 385, `🚑 INJURED: ${injNames}`, {
+        fontSize:'9px', fontFamily:'monospace', color:'#ef4444'
+      }).setOrigin(0.5);
+    }
+
     // Export notice
     this.add.text(W/2, 400, '✅ Stats saved — import to Gridiron GM to update your season', {
       fontSize:'9px', fontFamily:'monospace', color:'#334155'

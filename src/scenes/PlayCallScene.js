@@ -76,6 +76,21 @@ export class PlayCallScene extends Phaser.Scene {
     const passes = CALLS.filter(c=>c.cat==='pass');
     runs.forEach((c,i)   => this._makeBtn(c, px - 96, startY + i * (btnH+3), btnW, btnH, '#f59e0b', !!hlMap[c.id]));
     passes.forEach((c,i) => this._makeBtn(c, px + 96, startY + i * (btnH+3), btnW, btnH, '#3b82f6', !!hlMap[c.id]));
+
+    // INNO I29: play call history sidebar — last 5 calls as compact list
+    const _hist = state.callHistory||[];
+    if(_hist.length){
+      const _hx = px - panelW/2 - 70, _hy = py - panelH/2;
+      this.add.rectangle(_hx,py,130,panelH,0x0a1020,0.88).setDepth(31).setStrokeStyle(1,0x1e3a5f,0.6);
+      this.add.text(_hx,_hy+12,'LAST PLAYS',{fontSize:'7px',fontFamily:'monospace',fontStyle:'bold',color:'#334155',letterSpacing:2}).setOrigin(0.5,0).setDepth(32);
+      _hist.slice(-5).reverse().forEach((h,i)=>{
+        const _col = h.type==='td'?'#f59e0b':h.yards<0?'#ef4444':h.yards>0?'#22c55e':'#475569';
+        const _ydTxt = h.yards>0?`+${h.yards}`:`${h.yards}`;
+        const _lbl = CALLS.find(c=>c.id===h.call)?.label||h.call;
+        this.add.text(_hx,_hy+28+i*22,_lbl.substring(0,13),{fontSize:'8px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5,0).setDepth(32);
+        this.add.text(_hx,_hy+40+i*22,h.type==='td'?'TOUCHDOWN':h.type==='int'?'INTERCEPT':h.type==='fum'?'FUMBLE':_ydTxt+' yds',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:_col}).setOrigin(0.5,0).setDepth(32);
+      });
+    }
   }
 
   _show4thDown() {
@@ -149,6 +164,13 @@ export class PlayCallScene extends Phaser.Scene {
   }
 
   _select(callId) {
+    // INNO I29: annotate previous call with result, then record new call
+    const _prev = state.callHistory[state.callHistory.length-1];
+    if(_prev && !_prev.yards && state.lastResult){
+      _prev.yards  = state.lastResult.yards || 0;
+      _prev.type   = state.lastResult.td?'td':state.lastResult.turnover&&state.lastResult.text?.includes('INT')?'int':state.lastResult.turnover?'fum':'play';
+    }
+    state.callHistory = [...(state.callHistory||[]).slice(-9), {call:callId, yards:0, type:'play'}];
     const field = this.scene.get('Field');
     field?.events.emit('playCalled', callId);
     this.scene.stop();
