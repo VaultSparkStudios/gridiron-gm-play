@@ -80,6 +80,8 @@ export class FieldScene extends Phaser.Scene {
     this._playClockMs = 0; this._playClockEl = null;
     // P81-P85 flags
     this._teSeamActive = false; this._dlStunt = false; this._crackBlock = false; this._pumpFake = false; this._wildcatActive = false; this._pumpFakeBonus = 0; this._pumpFakeBtn = null;
+    // P86-P90 flags
+    this._fleaFlickerActive = false; this._endAroundActive = false; this._qbSneakActive = false; this._blitzPackage = false; this._blitzBtn = null;
     this._jmpBonus = 0;
     this._crowdNoise = false; this._pressureBar = null;
     // V3: speed trail graphics
@@ -348,8 +350,8 @@ export class FieldScene extends Phaser.Scene {
     this.jukeCD = 0;
     // H1: reset play clock each snap
     if(state.possession==='team'){this._playClockMs=40000;this._playClockEl?.setColor('#94a3b8').setText('⏱ 40');}else{this._playClockEl?.setText('');}
-    // P82: show DL stunt button when defending
-    if(state.possession!=='team')this.time.delayedCall(200,()=>this._showDLStuntBtn());
+    // P82: show DL stunt button when defending; P89: show Blitz Package alongside
+    if(state.possession!=='team'){this.time.delayedCall(200,()=>this._showDLStuntBtn());this.time.delayedCall(400,()=>this._showBlitzBtn());}
     this._spinUsed = false; // P38: reset per play
     this._holdingRoll = false; // P48: reset per play
     this._audibleActive = this._audibleActive||null; // P45: preserve audible across presnap
@@ -485,6 +487,8 @@ export class FieldScene extends Phaser.Scene {
     this._dlStunt=false;
     // P83: crack block reset each play
     this._crackBlock=false;
+    // P89: blitz package reset each play
+    this._blitzPackage=false;
     // P56: Goal line formation flash
     if(this._isGoalLine()&&state.possession==='team')this._applyGoalLineFormation();
     // P17: False start ~4% (offensive penalty, -5 yards, no play); P43: +5% AI false start in comeback mode
@@ -510,6 +514,9 @@ export class FieldScene extends Phaser.Scene {
     else if (callId === 'wildcat')                                        this._startWildcat();
     else if (callId === 'sideline_route')                                 this._startSidelineRoute();
     else if (callId === 'screen_pass')                                    this._startScreenPass();
+    else if (callId === 'flea_flicker')                                   this._startFleaFlicker();
+    else if (callId === 'end_around')                                     this._startEndAround();
+    else if (callId === 'qb_sneak')                                       this._startQBSneak();
     else if (callId === 'pass_action')                                    this._startPlayAction();
     else if (callId.startsWith('pass_')) {
       // P44: Hail Mary on 4th & long from deep in own territory
@@ -1315,6 +1322,8 @@ export class FieldScene extends Phaser.Scene {
         if(this._pumpFakeBonus){compCh=Math.min(0.92,compCh+this._pumpFakeBonus);this._pumpFakeBonus=0;}
         // P82: DL stunt — opponent sack bonus (only applies when opp has possession)
         if(this._dlStunt&&state.possession!=='team'){intCh=Math.min(0.30,intCh+0.08);this._dlStunt=false;}
+        // P89: Blitz package — higher INT/sack but risky if broken
+        if(this._blitzPackage&&state.possession!=='team'){if(Math.random()<0.40){intCh=Math.min(0.35,intCh+0.15);}this._blitzPackage=false;}
         // B4: QB personality modifiers — 'clutch' +8% in Q4; 'money' -8% when fatigued
         const _qbPerso=qb.personality;
         if(_qbPerso==='clutch'&&state.quarter>=4)compCh=Math.min(0.92,compCh+0.08);
@@ -3893,6 +3902,88 @@ export class FieldScene extends Phaser.Scene {
       this._resolvePlay(1.0,caught?'complete':'covered',yds);
     });
     this.time.delayedCall(4000,()=>{if(this._wildcatActive){destroy();this.phase='run';const yds=Phaser.Math.Between(1,5);this._tdFlash(`WILDCAT AUTO — ${yds} yds`,'#f59e0b');this._resolvePlay(1.0,'run',yds);}});
+  }
+
+  // ─── P86: Flea Flicker ───
+  _startFleaFlicker() {
+    this._fleaFlickerActive = true;
+    this.phase = 'pass';
+    Sound.whistle();
+    const W = this.scale.width, H = this.scale.height;
+    const qbData = state.team?.players?.find(p => p.pos === 'QB') || { ovr: 78, acc: 80 };
+    const wrData = state.team?.players?.find(p => p.pos === 'WR') || { ovr: 76, spd: 86 };
+    // Animate handoff to RB then pitch back to QB
+    const fl = this.add.text(W/2, FIELD_Y+FIELD_H/2-22, '🔄 FLEA FLICKER!', { fontSize:'13px', fontFamily:'monospace', fontStyle:'bold', color:'#f59e0b', stroke:'#000', strokeThickness:2 }).setOrigin(0.5).setDepth(22);
+    this.tweens.add({ targets: this.rb, x: this.rb.x + 30, duration: 400, ease:'Quad.easeOut', yoyo:true, onUpdate:()=>this._syncLbl(this.rb) });
+    this.time.delayedCall(600, () => {
+      fl?.destroy();
+      // Defenders commit to run — deep pass window
+      const defComp = Math.min(0.88, 0.42 + (qbData.acc||70)/200 + (wrData.ovr||70)/200);
+      const intRisk = Math.random() < 0.10; // 10% INT risk on trick play
+      if (intRisk) {
+        this._tdFlash('❌ FLEA FLICKER — INTERCEPTED!', '#ef4444');
+        state.turnovers = (state.turnovers || 0) + 1;
+        this._resolvePlay(1.0, 'int', 0);
+      } else {
+        const caught = Math.random() < defComp;
+        const yds = caught ? Phaser.Math.Between(12, 28) : 0;
+        this._tdFlash(caught ? `✅ FLEA FLICKER — ${yds} yds!` : '❌ FLEA FLICKER — Incomplete', caught ? '#f59e0b' : '#ef4444');
+        this._resolvePlay(1.0, caught ? 'complete' : 'covered', yds);
+      }
+      this._fleaFlickerActive = false;
+    });
+  }
+
+  // ─── P87: End Around ───
+  _startEndAround() {
+    this._endAroundActive = true;
+    this.phase = 'run';
+    Sound.whistle();
+    const W = this.scale.width;
+    const wrData = state.team?.players?.find(p => p.pos === 'WR') || { ovr: 76, spd: 88 };
+    const spdMod = (wrData.spd || 80) / 100;
+    this._tdFlash('🏃 END AROUND', '#38bdf8');
+    // Animate WR motioning to center then sweeping outside
+    const wr = this.wr1 || this.rb;
+    const origX = wr.x, origY = wr.y;
+    this.tweens.add({ targets: wr, x: this.qb.x + 8, y: this.qb.y, duration: 300, ease:'Quad.easeIn', onUpdate:()=>this._syncLbl(wr), onComplete:()=>{
+      this.tweens.add({ targets: wr, x: origX + 80, y: origY, duration: 500, ease:'Quad.easeOut', onUpdate:()=>this._syncLbl(wr), onComplete:()=>{
+        const yds = Math.round(3 + spdMod * 9 + (Math.random() < 0.20 ? Phaser.Math.Between(3,6) : 0));
+        this._tdFlash(`END AROUND — ${yds} yds`, '#38bdf8');
+        this._resolvePlay(1.0, 'run', Math.min(yds, 18));
+        this._endAroundActive = false;
+      }});
+    }});
+  }
+
+  // ─── P88: QB Sneak ───
+  _startQBSneak() {
+    this._qbSneakActive = true;
+    this.phase = 'run';
+    Sound.whistle();
+    const qbData = state.team?.players?.find(p => p.pos === 'QB') || { str: 70 };
+    const strMod = (qbData.str || 70) / 100;
+    this._tdFlash('💪 QB SNEAK', '#7dd3fc');
+    // Animate QB diving forward
+    this.tweens.add({ targets: this.qb, x: this.qb.x + 18, duration: 300, ease:'Quad.easeIn', yoyo:true, onUpdate:()=>this._syncLbl(this.qb), onComplete:()=>{
+      const yds = Math.round(0.5 + strMod * 3.5);
+      const clamped = Math.max(1, Math.min(4, yds));
+      this._tdFlash(`QB SNEAK — ${clamped} yd${clamped===1?'':'s'}`, '#7dd3fc');
+      this._resolvePlay(1.0, 'run', clamped);
+      this._qbSneakActive = false;
+    }});
+  }
+
+  // ─── P89: Blitz Package button ───
+  _showBlitzBtn() {
+    if (state.possession === 'team') return;
+    const W = this.scale.width, H = this.scale.height;
+    const bg = this.add.rectangle(W/2 + 60, FIELD_Y+FIELD_H+38, 88, 22, 0x7c3aed, 0.9).setDepth(22).setInteractive({ useHandCursor:true });
+    const tx = this.add.text(W/2 + 60, FIELD_Y+FIELD_H+38, '🚀 BLITZ', { fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#e9d5ff' }).setOrigin(0.5).setDepth(23);
+    this._blitzBtn = [bg, tx];
+    const destroy = () => { bg?.destroy(); tx?.destroy(); this._blitzBtn = null; };
+    bg.once('pointerdown', () => { destroy(); this._blitzPackage = true; this._tdFlash('BLITZ CALLED! +INT chance', '#a78bfa'); });
+    this.time.delayedCall(2000, () => destroy());
   }
 
   // ─── P77: Penalty Accept/Decline ───

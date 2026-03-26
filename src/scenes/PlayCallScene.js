@@ -5,6 +5,8 @@ const CALLS = [
   { id:'run_outside', label:'Outside Run',  cat:'run',  tip:'Sweep the edge' },
   { id:'scramble',    label:'QB Scramble',  cat:'run',  tip:'QB takes off' },
   { id:'run_draw',    label:'Draw Play',    cat:'run',  tip:'RB delays — freezes D' },
+  { id:'wildcat',     label:'Wildcat',      cat:'run',  tip:'RB takes snap — dual option' },
+  { id:'end_around',  label:'End Around',   cat:'run',  tip:'WR takes snap — edge run' },
   { id:'pass_quick',  label:'Quick Pass',   cat:'pass', tip:'Safe — low INT risk' },
   { id:'pass_medium', label:'Medium Route', cat:'pass', tip:'Balanced timing' },
   { id:'pass_deep',   label:'Deep Shot',    cat:'pass', tip:'High risk / reward' },
@@ -12,7 +14,7 @@ const CALLS = [
   { id:'screen_pass',    label:'Screen Pass',   cat:'pass', tip:'RB flat — linemen release' },
   { id:'sideline_route', label:'Sideline Route', cat:'pass', tip:'WR out — clock stops' },
   { id:'te_seam',        label:'TE Seam',        cat:'pass', tip:'TE vertical — LB mismatch' },
-  { id:'wildcat',        label:'Wildcat',         cat:'run',  tip:'RB takes snap — dual option' },
+  { id:'flea_flicker',   label:'Flea Flicker',   cat:'pass', tip:'Handoff → pitch back → deep' },
 ];
 
 export class PlayCallScene extends Phaser.Scene {
@@ -25,7 +27,7 @@ export class PlayCallScene extends Phaser.Scene {
 
   _showCallGrid() {
     const W = this.scale.width, H = this.scale.height;
-    const panelW = 370, panelH = 310;
+    const panelW = 370, panelH = 380;
     const px = W/2, py = H - panelH/2 - 8;
 
     this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.88).setDepth(30);
@@ -40,7 +42,7 @@ export class PlayCallScene extends Phaser.Scene {
       fontSize:'10px', fontFamily:'monospace', color:'#64748b'
     }).setOrigin(0.5, 0).setDepth(32);
 
-    const btnW=166, btnH=46, startY = py - panelH/2 + 68;
+    const btnW=166, btnH=38, startY = py - panelH/2 + 68;
     this.add.text(px - 96, startY - 12, '🦶 RUN',  { fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#f59e0b' }).setOrigin(0.5,0).setDepth(32);
     this.add.text(px + 96, startY - 12, '🏈 PASS', { fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#3b82f6' }).setOrigin(0.5,0).setDepth(32);
 
@@ -57,11 +59,13 @@ export class PlayCallScene extends Phaser.Scene {
       pass_action: (_d<=2&&_t>=4),
       screen_pass: (_d===3&&_t>=7&&_t<=14),
       sideline_route:(_d===3&&_t>=3&&state.quarter>=4),
+      end_around:  (_d<=2&&_t<=5),
+      flea_flicker:(_d===1&&_t>=10),
     };
     const runs   = CALLS.filter(c=>c.cat==='run');
     const passes = CALLS.filter(c=>c.cat==='pass');
-    runs.forEach((c,i)   => this._makeBtn(c, px - 96, startY + i * (btnH+5), btnW, btnH, '#f59e0b', !!hlMap[c.id]));
-    passes.forEach((c,i) => this._makeBtn(c, px + 96, startY + i * (btnH+5), btnW, btnH, '#3b82f6', !!hlMap[c.id]));
+    runs.forEach((c,i)   => this._makeBtn(c, px - 96, startY + i * (btnH+3), btnW, btnH, '#f59e0b', !!hlMap[c.id]));
+    passes.forEach((c,i) => this._makeBtn(c, px + 96, startY + i * (btnH+3), btnW, btnH, '#3b82f6', !!hlMap[c.id]));
   }
 
   _show4thDown() {
@@ -100,6 +104,10 @@ export class PlayCallScene extends Phaser.Scene {
       this.children.removeAll(true);
       this._showCallGrid();
     });
+    // P88: QB Sneak — short yardage option
+    if (state.toGo <= 2) {
+      this._make4thBtn(px, btnY + 76, 'QB SNEAK', `${state.toGo} yd dive`, 0x1e3a5f, '#7dd3fc', () => this._select('qb_sneak'));
+    }
   }
 
   _make4thBtn(cx, cy, label, sub, bgHex, textHex, cb) {
