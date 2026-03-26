@@ -89,6 +89,10 @@ export class FieldScene extends Phaser.Scene {
     this._defMiniGameUsed = false; this._replayStore = null; this._replayBtn = null;
     // P104-P110 flags
     this._returnLaneMod = 0; this._nlPumpBonus = 0; this._nlPumpEls = null; this._stripBtnShown = false; this._stripBtnEl = null;
+    // INNO I12: QB hot/cold streak (+N = hot completions, -N = cold)
+    this._qbStreak = 0;
+    // INNO I13: disguise defense flag
+    this._defDisguise = false;
     // P96-P97 flags
     this._coverageAssignMod = 0; this._jumpRouteActive = false; this._jumpRouteEls = null;
     this._jmpBonus = 0;
@@ -352,6 +356,7 @@ export class FieldScene extends Phaser.Scene {
     this._readOptionChoice = false;
     this._secondReadActive = false;
     this._checkdownActive = false;
+    this._defDisguise = false;
     this._jumpRouteActive = false;
     this._jmpBonus = 0;
     this._coverageAssignMod = 0;
@@ -1443,7 +1448,9 @@ export class FieldScene extends Phaser.Scene {
         // P64: Hurry-up -5% comp penalty (FIX P1: moved before use to avoid TDZ)
         const _hurryPenalty = this._hurryUpActive ? -0.05 : 0;
         this._hurryUpActive = false;
-        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen+_confBonus+_cyBonus-_diffCovPen)*wxPassM, 0.22, 0.88);
+        // INNO I12: QB hot/cold streak modifier
+        const _streakMod = (this._qbStreak||0)>=3?0.08:(this._qbStreak||0)<=-2?-0.05:0;
+        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen+_confBonus+_cyBonus-_diffCovPen+_streakMod)*wxPassM, 0.22, 0.88);
         // P71: motion pre-snap +10% comp on one route
         if(this._motionUsed){compCh=Math.min(0.92,compCh+0.10);this._motionUsed=false;}
         // P54: QB reads modifier
@@ -1485,6 +1492,8 @@ export class FieldScene extends Phaser.Scene {
             this._endPlay({ yards:piYards, text:`FLAG — Pass Interference! +${piYards} yds, Auto 1st down.`, type:'penalty', turnover:false, td:state.yardLine+piYards>=100 }); return;
           }
           Sound.incomplete(); this._track(qb.id,'att',1);
+          // INNO I12: track incompletions for QB cold streak
+          this._qbStreak=Math.max(-3,(this._qbStreak||0)-1);if(this._qbStreak===-2)this._broadcastBanner('❄️ QB STRUGGLING','#93c5fd');
           this._endPlay({ yards:0, text:'Incomplete.', type:'inc', turnover:false, td:false }); return;
         }
         let base = isDeep ? Phaser.Math.Between(14,36) : variant==='quick' ? Phaser.Math.Between(3,8) : Phaser.Math.Between(6,15);
@@ -1570,6 +1579,11 @@ export class FieldScene extends Phaser.Scene {
     if(this._thirdDownAtt>=4&&this._thirdDownConv/this._thirdDownAtt>=0.50){this._updateMomentum(20);this._thirdDownAtt=0;this._thirdDownConv=0;this._updateThirdHUD();}
     // P43: check comeback mode each play
     this._checkComebackMode();
+    // INNO I12: QB hot/cold streak tracking
+    if(isPass){
+      if(yards>0){this._qbStreak=Math.min(5,(this._qbStreak||0)+1);if(this._qbStreak===3)this._broadcastBanner('🔥 QB ON A HOT STREAK','#f59e0b');}
+      else{this._qbStreak=Math.max(-3,(this._qbStreak||0)-1);if(this._qbStreak===-2)this._broadcastBanner('❄️ QB STRUGGLING','#93c5fd');}
+    }
     const text = td ? `🏈 TOUCHDOWN! +${yards} yds!` : `${yards>0?'+':''}${yards} yards`;
     this._endPlay({ yards:yards||0, text, type:td?'td':(isRun?'run':'pass'), turnover:false, td });
   }
@@ -1892,7 +1906,17 @@ export class FieldScene extends Phaser.Scene {
       state.yardLine=Math.max(1,state.yardLine+5);
       this._drawLines();
     }
-    const call = this._defCall || 'cover2';
+    // INNO I13: Disguise — AI reads a random coverage instead of real call
+    const _calls=['cover2','man','blitz','prevent'];
+    const call = this._defDisguise ? _calls[Math.floor(Math.random()*_calls.length)] : (this._defCall || 'cover2');
+    this._defDisguise = false;
+    // INNO I17: AI personality — adapt strategy to score/down situation
+    const _aiScore=state.score.opp, _usScore=state.score.team, _aiDiff=_aiScore-_usScore;
+    const _aiIsLosingBig=_aiDiff<-10&&state.quarter>=3;
+    const _aiIsWinningBig=_aiDiff>10&&state.quarter>=3;
+    const _aiPersonality = _aiIsLosingBig?'desperate':_aiIsWinningBig?'conservative':'balanced';
+    // Desperate: hurry-up pass-heavy; Conservative: run more to bleed clock
+    if(_aiPersonality==='desperate')this._aiHurryUp=true;
     // Reset _defSpd to base before applying call modifier (prevents stacking across drives)
     const _dBase = state.team?.players?.find(p=>p.pos==='QB')||{spd:66};
     this._defSpd = pxs(_dBase.spd, 90, 1.2);
@@ -1900,7 +1924,10 @@ export class FieldScene extends Phaser.Scene {
     else if (call === 'blitz')   { this._aiRunSpeed *= 1.12; this._launchBlitzPursuer(); }
     else if (call === 'prevent') { this._aiRunSpeed *= 0.84; this._defSpd *= 0.88; }
     // P25: hurry-up overrides pass chance and speeds up AI RB
-    const passCh = this._aiHurryUp ? 0.65 : ({cover2:0.35, man:0.45, blitz:0.55, prevent:0.20}[call] || 0.35);
+    // INNO I17: personality modifies AI pass tendency
+    let passCh = this._aiHurryUp ? 0.65 : ({cover2:0.35, man:0.45, blitz:0.55, prevent:0.20}[call] || 0.35);
+    if(_aiPersonality==='conservative') passCh=Math.max(0.12, passCh-0.15); // run heavy to bleed clock
+    if(_aiPersonality==='desperate') passCh=Math.min(0.80, passCh+0.20); // pass heavy to catch up
     if (this._aiHurryUp) { this._aiRunSpeed *= 1.08; }
     if (Math.random() < passCh) { this._startAIPass(); return; }
     this.phase = 'ai_run';
@@ -2106,6 +2133,13 @@ export class FieldScene extends Phaser.Scene {
       bg.on('pointerdown', ()=>{ cleanup(); this._defCall=c.id; onSelect(); });
       els.push(bg, lbl, tip);
     });
+    // INNO I13: Disguise Defense toggle — AI can't read your coverage call
+    let _disguiseOn=false;
+    const _dgy=startY+2*(btnH+6)+8;
+    const _dgBg=this.add.rectangle(px,_dgy,340,30,0x0d1020).setDepth(37).setStrokeStyle(1,0x7c3aed,0.5).setInteractive({useHandCursor:true});
+    const _dgTx=this.add.text(px,_dgy,'🎭 DISGUISE COVERAGE — AI can\'t read your call',{fontSize:'8px',fontFamily:'monospace',color:'#94a3b8'}).setOrigin(0.5).setDepth(38);
+    _dgBg.on('pointerdown',()=>{_disguiseOn=!_disguiseOn;this._defDisguise=_disguiseOn;_dgBg.setFillStyle(_disguiseOn?0x3b0764:0x0d1020);_dgTx.setColor(_disguiseOn?'#a78bfa':'#94a3b8');});
+    els.push(_dgBg,_dgTx);
   }
 
   _userTackle() {
