@@ -75,6 +75,14 @@ export function resetState() {
   state._twoMin2 = false;
 }
 
+export function computeGrade(d) {
+  let _sc=0;
+  if(d.passYds){_sc+=Math.min(50,d.passYds/5);_sc+=(d.passTD||0)*12;_sc-=(d.ints||0)*14;}
+  if(d.rushYds){_sc+=Math.min(40,d.rushYds/2.5);_sc+=(d.rtds||0)*10;}
+  if(d.recYds){_sc+=Math.min(35,d.recYds/2.5);_sc+=(d.retds||0)*10;}
+  return _sc<=0?null:_sc>=50?'A+':_sc>=40?'A':_sc>=30?'B+':_sc>=20?'B':_sc>=12?'C':_sc>=4?'D':'F';
+}
+
 export function exportStats() {
   const out = {
     ...state.stats,
@@ -88,9 +96,7 @@ export function exportStats() {
     playerDeltas: state.team?.players?.map(p => {
       const ps = state.playerStats[p.id] || {};
       const d = { id:p.id, pos:p.pos, name:p.name, passYds:ps.passYds||0, att:ps.att||0, comp:ps.comp||0, passTD:ps.passTD||0, ints:ps.int||0, rushYds:ps.rushYds||0, rushAtt:ps.rushAtt||0, rtds:ps.rushTD||0, recYds:ps.recYds||0, rec:ps.rec||0, retds:ps.recTD||0 };
-      // B1: compute per-game grade for GM import
-      let _sc=0; if(d.passYds){_sc+=Math.min(50,d.passYds/5);_sc+=(d.passTD||0)*12;_sc-=(d.ints||0)*14;} if(d.rushYds){_sc+=Math.min(40,d.rushYds/2.5);_sc+=(d.rtds||0)*10;} if(d.recYds){_sc+=Math.min(35,d.recYds/2.5);_sc+=(d.retds||0)*10;}
-      d.grade = _sc<=0?null:_sc>=50?'A+':_sc>=40?'A':_sc>=30?'B+':_sc>=20?'B':_sc>=12?'C':_sc>=4?'D':'F';
+      d.grade = computeGrade(d);
       return d;
     }) || [],
   };

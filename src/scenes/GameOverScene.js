@@ -1,4 +1,4 @@
-import { state, exportStats } from '../data/gameState.js';
+import { state, exportStats, computeGrade } from '../data/gameState.js';
 import { track } from '../utils/analytics.js';
 
 export class GameOverScene extends Phaser.Scene {
@@ -49,8 +49,7 @@ export class GameOverScene extends Phaser.Scene {
       `TDs:       ${os.td}`,
     ].forEach((l,i) => this.add.text(W/2+15, 167+i*22, l, { fontSize:'11px', fontFamily:'monospace', color:'#64748b' }));
 
-    // GO1: player grade function
-    const _grade=p=>{let sc=0;if(p.passYds){sc+=Math.min(50,p.passYds/5);sc+=(p.passTD||0)*12;sc-=(p.ints||0)*14;}if(p.rushYds){sc+=Math.min(40,p.rushYds/2.5);sc+=(p.rtds||0)*10;}if(p.recYds){sc+=Math.min(35,p.recYds/2.5);sc+=(p.retds||0)*10;}if(sc<=0)return null;return sc>=50?'A+':sc>=40?'A':sc>=30?'B+':sc>=20?'B':sc>=12?'C':sc>=4?'D':'F';};
+    // GO1: player grade (shared computeGrade from gameState)
     const _gcol=g=>g==='A+'||g==='A'?'#22c55e':g==='B+'||g==='B'?'#3b82f6':g==='C'?'#f59e0b':g==='D'?'#f97316':'#ef4444';
 
     // Per-player breakdown
@@ -67,7 +66,7 @@ export class GameOverScene extends Phaser.Scene {
         if (p.int)      parts.push(`${p.int}INT`);
         if (parts.length === 0) return;
         const line = `${p.name.split(' ').pop()} (${p.pos}): ${parts.join(' ')}`;
-        const g = _grade(p);
+        const g = computeGrade(p);
         this.add.text(W/2-10, 266+row*16, line, { fontSize:'9px', fontFamily:'monospace', color:'#475569' }).setOrigin(0.5);
         // GO1: grade badge
         if(g)this.add.text(W/2+W*0.28, 266+row*16, g, {fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:_gcol(g)}).setOrigin(0.5);

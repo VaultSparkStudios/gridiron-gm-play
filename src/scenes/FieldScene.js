@@ -47,7 +47,7 @@ export class FieldScene extends Phaser.Scene {
     this._lastReceiver = null;
     this._passRushActive = false;
     this._pocketBeaten = [false, false, false, false, false];
-    this._passRushMode = false; this._passRushCoverBreak = false; this._blitzBtn = null; this._rushThrowTimer = null;
+    this._passRushMode = false; this._passRushCoverBreak = false; this._rushThrowTimer = null;
     this._noHuddleActive = false; this._fadeEls = null; this._trickEls = null;
     // P36-P43 flags
     this._spinUsed = false; this._challengeUsed = false; this._comebackMode = false;
@@ -84,6 +84,8 @@ export class FieldScene extends Phaser.Scene {
     this._fleaFlickerActive = false; this._endAroundActive = false; this._qbSneakActive = false; this._blitzPackage = false; this._blitzBtn = null;
     this._jmpBonus = 0;
     this._crowdNoise = false; this._pressureBar = null;
+    // Tendency tracker: rolling window of last 6 calls ('run'|'pass') for AI counter-calling
+    this._callHistory = [];
     // V3: speed trail graphics
     this._trailGfx = this.add.graphics().setDepth(3);
     this._trailPts = [];
@@ -471,6 +473,8 @@ export class FieldScene extends Phaser.Scene {
 
   _onPlayCalled(callId) {
     state.currentCall = callId;
+    // Tendency tracker — record call type for AI counter-calling
+    if(callId!=='punt'&&callId!=='fg'){const _ct=(callId.startsWith('run_')||callId==='scramble'||callId==='wildcat'||callId==='end_around'||callId==='qb_sneak')?'run':'pass';this._callHistory.push(_ct);if(this._callHistory.length>6)this._callHistory.shift();}
     // P42: save pre-play state for challenge flag
     this._savePrePlayState();
     // P45: Audible override
@@ -1287,8 +1291,9 @@ export class FieldScene extends Phaser.Scene {
           base = Math.floor(Math.random() * 3); // 0, 1, or 2 yards
           if ((rb.str || 70) > 75 && Math.random() < 0.35) base = Math.min(2, base + 1);
         } else {
-          // Base 2–5 yards; speed differential adds 0–3 more
-          base = 2 + ((rb.spd - 70) * 0.10 * fatMul) + Phaser.Math.Between(-1, 5);
+          // Base 2–5 yards; speed differential adds 0–3 more; tendency: -1 if last 3 all run
+          const _last3r=this._callHistory.slice(-3);const _tendRunPen=(_last3r.length===3&&_last3r.every(c=>c==='run'))?-1:0;
+          base = 2 + ((rb.spd - 70) * 0.10 * fatMul) + Phaser.Math.Between(-1, 5) + _tendRunPen;
         }
         yards = Math.round(base * qteBonus);
       } else if (isPass) {
@@ -1305,7 +1310,9 @@ export class FieldScene extends Phaser.Scene {
         // P55: defensive formation coverage/sack bonus
         const defForm = DEF_FORMATIONS[this._defFormation] || DEF_FORMATIONS['4-3'];
         intCh = Math.max(0.01, intCh - defForm.coverageBonus * 0.5);
-        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty)*wxPassM, 0.22, 0.88);
+        // Tendency: AI keys on pass if last 3 calls were all pass — -6% comp
+        const _last3t=this._callHistory.slice(-3);const _tendPassPen=(_last3t.length===3&&_last3t.every(c=>c==='pass'))?-0.06:0;
+        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen)*wxPassM, 0.22, 0.88);
         // P64: Hurry-up -5% comp penalty
         const _hurryPenalty = this._hurryUpActive ? -0.05 : 0;
         this._hurryUpActive = false;
