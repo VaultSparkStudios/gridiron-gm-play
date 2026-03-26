@@ -79,6 +79,8 @@ export class FieldScene extends Phaser.Scene {
     this._bumpCovEls = []; this._slideEls = []; this._rzRunEls = []; this._penaltyEls = []; this._twoMinFired1 = false; this._twoMinFired2 = false;
     // P80 flags: H1 play clock, G4 jump ball, B3 crowd noise, G3 pressure bar
     this._playClockMs = 0; this._playClockEl = null;
+    // INNO I15/I16/I20 [SIL]: persistent game-state flags (never reset per-play)
+    this._trickPlayMem = false; this._maxDeficit = 0; this._comebackShown = false; this._weatherEscalated = false;
     // P81-P85 flags
     this._teSeamActive = false; this._dlStunt = false; this._crackBlock = false; this._pumpFake = false; this._wildcatActive = false; this._pumpFakeBonus = 0; this._pumpFakeBtn = null;
     // P86-P90 flags
@@ -363,6 +365,10 @@ export class FieldScene extends Phaser.Scene {
     this._returnLaneMod = 0;
     this._stripBtnShown = false;
     this._nlPumpBonus = 0;
+    // INNO I14 [SIL]: reset play-clock shake flag each play
+    this._playClockShook = false;
+    // INNO I15 [SIL]: trick play memory — per-play penalty flag (trickPlayMem persists)
+    this._trickMemCovPenalty = false;
     // Destroy transient UI elements
     this._nlPumpEls?.forEach(e=>e?.destroy?.()); this._nlPumpEls = null;
     this._jumpRouteEls?.forEach(e=>e?.destroy?.()); this._jumpRouteEls = null;
@@ -961,9 +967,11 @@ export class FieldScene extends Phaser.Scene {
     // P55: apply fatigue to runner
     if (rb.id) this._applyFatigue(rb.id, runnerPos === 'QB' ? 12 : 8);
     const wxFumM = state.weather==='snow'?1.5:state.weather==='rain'?1.3:1;
+    // INNO I20 [SIL]: 2nd half weather escalation — additional fumble multiplier
+    const _wxEscMul = this._weatherEscalated?(state.weather==='snow'?1.4:state.weather==='rain'?1.25:1):1;
     // Chemistry < 50 adds butterfingers: +10% base fumble chance
     const _chemMul = (state.chemistry||75) < 50 ? 1.10 : 1.0;
-    let fumCh = Math.max(0.02, (0.055 - (rb.str - 70) * 0.0006) * wxFumM * _chemMul);
+    let fumCh = Math.max(0.02, (0.055 - (rb.str - 70) * 0.0006) * wxFumM * _wxEscMul * _chemMul);
     if (taps < 2) fumCh = Math.min(0.60, fumCh * 4);
     else if (taps >= 4) fumCh *= 0.25;
     if (Math.random() < fumCh) {
@@ -1423,6 +1431,8 @@ export class FieldScene extends Phaser.Scene {
           base = 2 + ((rb.spd - 70) * 0.10 * fatMul) + Phaser.Math.Between(-1, 5) + _tendRunPen;
         }
         yards = Math.round(base * qteBonus);
+        // INNO I15 [SIL]: trick play memory — defense keys on end around repeat
+        if(this._trickMemCovPenalty&&this._endAroundActive){yards=Math.max(-2,yards-3);}
       } else if (isPass) {
         const variant = call.replace('pass_','');
         const isDeep = variant==='deep' || variant==='action';
@@ -1451,6 +1461,8 @@ export class FieldScene extends Phaser.Scene {
         // INNO I12: QB hot/cold streak modifier
         const _streakMod = (this._qbStreak||0)>=3?0.08:(this._qbStreak||0)<=-2?-0.05:0;
         let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen+_confBonus+_cyBonus-_diffCovPen+_streakMod)*wxPassM, 0.22, 0.88);
+        // INNO I15 [SIL]: trick play memory — defense anticipates flea flicker repeat
+        if(this._trickMemCovPenalty&&this._fleaFlickerActive){compCh=Math.max(0.10,compCh-0.20);}
         // P71: motion pre-snap +10% comp on one route
         if(this._motionUsed){compCh=Math.min(0.92,compCh+0.10);this._motionUsed=false;}
         // P54: QB reads modifier
@@ -1659,6 +1671,10 @@ export class FieldScene extends Phaser.Scene {
     if(!this._challengeUsed && result.turnover && (result.type==='int'||result.type==='fumble')) {
       this.time.delayedCall(600, ()=>this._showChallengeOption());
     }
+    // INNO I16 [SIL]: comeback tracking — track max deficit; show overlay when user erases it
+    const _curDef=state.score.opp-state.score.team;
+    if(_curDef>this._maxDeficit)this._maxDeficit=_curDef;
+    if(!this._comebackShown&&this._maxDeficit>=7&&state.score.team>=state.score.opp&&result.td){this._comebackShown=true;this.time.delayedCall(400,()=>this._broadcastBanner(`🔥 COMEBACK! Erased ${this._maxDeficit}-pt deficit`,'#f59e0b'));}
     // P77: Penalty flag — 3% chance on AI plays, show Accept/Decline
     if(state.possession==='opp'&&!result.td&&!result.turnover&&Math.random()<0.03){
       this.time.delayedCall(400,()=>this._showPenaltyChoice('OFFENSIVE HOLDING',10,'team'));
@@ -2305,6 +2321,8 @@ export class FieldScene extends Phaser.Scene {
     state._drillMode=false;
     // Weather escalation: wind shifts direction/intensity at halftime
     if(this._wind){const _wdirs=['←','→','↑','↓'];this._wind={dir:_wdirs[Phaser.Math.Between(0,3)],mph:clamp((this._wind.mph||8)+Phaser.Math.Between(-3,5),3,22)};}
+    // INNO I20 [SIL]: weather escalation in 2nd half — rain/snow worsens
+    if(state.weather==='rain'||state.weather==='snow'){this._weatherEscalated=true;}
     const W=this.scale.width, H=this.scale.height;
     const t=state.team?.ab||'YOU', o=state.opponent?.ab||'OPP';
     const bg=this.add.rectangle(W/2,H/2,W,H,0x0a0f1a,0.96).setDepth(62);
@@ -2331,7 +2349,9 @@ export class FieldScene extends Phaser.Scene {
     });
     // Wind update badge if changed
     if(this._wind){const _wEl=this.add.text(W/2,H/2+82,`💨 Wind shifts: ${this._wind.dir} ${this._wind.mph}mph`,{fontSize:'9px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0.5).setDepth(63);_els.push(_wEl);}
-    const sub=this.add.text(W/2,H/2+98,'2nd Half Kickoff',{fontSize:'11px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(63);
+    // INNO I20 [SIL]: weather escalation warning panel
+    if(this._weatherEscalated){const _wxWarn=this.add.text(W/2,H/2+96,`⚠ ${state.weather==='snow'?'SNOW':'RAIN'} INTENSIFIES — fumble risk up 2nd half`,{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#ef4444'}).setOrigin(0.5).setDepth(63);_els.push(_wxWarn);}
+    const sub=this.add.text(W/2,H/2+(this._weatherEscalated?110:98),'2nd Half Kickoff',{fontSize:'11px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(63);
     _els.push(sub);
     Sound.whistle();
     this.time.delayedCall(4000,()=>{
@@ -2746,6 +2766,8 @@ export class FieldScene extends Phaser.Scene {
       this._playClockMs-=delta;
       const _pcs=Math.ceil(this._playClockMs/1000);
       this._playClockEl?.setColor(_pcs<=5?'#ef4444':_pcs<=10?'#f59e0b':'#94a3b8').setText(`⏱ ${_pcs}`);
+      // INNO I14 [SIL]: pressure escalation — pulse + camera shake once at ≤5s
+      if(_pcs<=5&&!this._playClockShook){this._playClockShook=true;this.cameras.main.shake(180,0.004);this.tweens.add({targets:this._playClockEl,scaleX:1.6,scaleY:1.6,duration:130,yoyo:true,ease:'Back.easeOut'});}
       if(this._playClockMs<=0){this._playClockMs=-1;this.phase='result';Sound.whistle?.();this._tdFlash('⏱ DELAY OF GAME — 5 yds','#f59e0b');this._endPlay({yards:-5,text:'Delay of Game. 5-yard penalty.',type:'penalty',turnover:false,td:false});}
     }
 
@@ -4228,6 +4250,9 @@ export class FieldScene extends Phaser.Scene {
   _startFleaFlicker() {
     this._fleaFlickerActive = true;
     this.phase = 'pass';
+    // INNO I15 [SIL]: trick play consequence memory — defense anticipates if used before
+    if(this._trickPlayMem){this._trickMemCovPenalty=true;this._tdFlash('⚠ DEFENSE READS TRICK','#ef4444');}
+    this._trickPlayMem = true;
     Sound.whistle();
     const W = this.scale.width, H = this.scale.height;
     const qbData = state.team?.players?.find(p => p.pos === 'QB') || { ovr: 78, acc: 80 };
@@ -4258,6 +4283,9 @@ export class FieldScene extends Phaser.Scene {
   _startEndAround() {
     this._endAroundActive = true;
     this.phase = 'run';
+    // INNO I15 [SIL]: trick play consequence memory
+    if(this._trickPlayMem){this._trickMemCovPenalty=true;this._tdFlash('⚠ DEFENSE READS TRICK','#ef4444');}
+    this._trickPlayMem = true;
     Sound.whistle();
     const W = this.scale.width;
     const wrData = state.team?.players?.find(p => p.pos === 'WR') || { ovr: 76, spd: 88 };

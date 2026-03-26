@@ -59,6 +59,11 @@ export class HudScene extends Phaser.Scene {
       fontSize:'8px',fontFamily:'monospace',color:'#475569'
     }).setOrigin(1,0).setDepth(21);
 
+    // INNO I12 [SIL]: QB streak indicator — 🔥 hot / ❄️ cold badge
+    this.streakTxt=this.add.text(W/2+10,38,'',{
+      fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b'
+    }).setOrigin(0,0).setDepth(21);
+
     // ── H3: FIRST-DOWN PROGRESS BAR ────────────────────────────────────────
     this._ydBarBg=this.add.rectangle(W/2,HH+3,W,5,0x0f172a,0.95).setDepth(20);
     this._ydBar=this.add.rectangle(2,HH+3,2,5,0x22c55e,1).setDepth(21).setOrigin(0,0.5);
@@ -118,6 +123,9 @@ export class HudScene extends Phaser.Scene {
     this.tweens.add({targets:this.resultTxt,alpha:0,duration:1400,delay:600});
     this._onPhaseChange('presnap');
     this._updateYdBar();
+    // INNO I12 [SIL]: update QB streak badge
+    const _qs=this.scene.get('Field')?._qbStreak||0;
+    if(this.streakTxt){if(_qs>=3){this.streakTxt.setText('🔥 HOT').setColor('#f59e0b');}else if(_qs<=-2){this.streakTxt.setText('❄️ COLD').setColor('#93c5fd');}else{this.streakTxt.setText('');} }
     // Score bug pulse — flash team color side bar on any scoring play
     const _scored = result.td || result.text?.includes('FG GOOD') || result.text?.includes('+3') || result.text?.includes('PICK SIX') || result.text?.includes('PAT');
     if (_scored) {
