@@ -98,6 +98,8 @@ export class FieldScene extends Phaser.Scene {
     // P96-P97 flags
     this._coverageAssignMod = 0; this._jumpRouteActive = false; this._jumpRouteEls = null;
     this._jmpBonus = 0;
+    // INNO I24: timer registry for clean scene shutdown; I32: fatigue visual ring
+    this._timerRegistry = []; this._fatRingGfx = null;
     this._crowdNoise = false; this._pressureBar = null;
     // Tendency tracker: rolling window of last 6 calls ('run'|'pass') for AI counter-calling
     this._callHistory = [];
@@ -105,6 +107,8 @@ export class FieldScene extends Phaser.Scene {
     this._momentum = clamp(50 + clamp((state.streak||0)*5,-20,20), 30, 70);
     // Difficulty modifier (affects AI comp%, AI rush speed)
     this._diffMod = {rookie:-0.12, normal:0, veteran:0.08, hof:0.15}[state.difficulty||'normal']||0;
+    // INNO I25: streak-driven difficulty nudge — each win tightens AI by ~1.2%
+    const _dynNudge=clamp((state.streak||0)*0.012,-0.06,0.06); this._diffMod=clamp(this._diffMod+_dynNudge,-0.18,0.22);
     // V3: speed trail graphics
     this._trailGfx = this.add.graphics().setDepth(3);
     this._trailPts = [];
@@ -140,7 +144,7 @@ export class FieldScene extends Phaser.Scene {
         spd: wx==='rain' ? 7+Math.random()*5 : 1+Math.random()*2,
         drift: (Math.random()-0.5)*0.8 });
     }
-    this.time.addEvent({ delay:33, loop:true, callback:()=>{
+    this._regTimer(this.time.addEvent({ delay:33, loop:true, callback:()=>{
       drops.forEach(d=>{
         d.x+=d.drift; d.y+=d.spd;
         if(d.y>H){ d.y=-8; d.x=Math.random()*W; }
@@ -153,7 +157,7 @@ export class FieldScene extends Phaser.Scene {
           d.gfx.fillCircle(d.x,d.y,1.5);
         }
       });
-    }});
+    }}));
   }
 
   // ─── FIELD ────────────────────────────────────────────────────────────────
@@ -776,6 +780,8 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     const made = Math.random() < Math.max(0.08, Math.min(0.96, 1.08 - dist*0.013 + windAccMod/100));
+    // INNO I28: FG trajectory arc — animated ball path toward uprights
+    {const _fgBall=this.add.circle(this.qb.x,this.qb.y,4,made?0x22c55e:0xef4444).setDepth(16);const _fgEndX=FIELD_RIGHT-8;const _fgPeakY=FIELD_Y-28;let _fgT=0;const _fgTk=this.time.addEvent({delay:16,repeat:26,callback:()=>{_fgT+=1/26;const _mx=this.qb.x+(_fgEndX-this.qb.x)*_fgT;const _my=this.qb.y+(_fgPeakY-this.qb.y)*Math.sin(Math.PI*_fgT);_fgBall.setPosition(_mx,_my);if(_fgT>=1)_fgBall?.destroy();}});}
     if (made) {
       state.score.team += 3;
       state.yardLine = 20; // flip in _endPlay will give opponent their 80 (80 yds to score)
@@ -835,7 +841,7 @@ export class FieldScene extends Phaser.Scene {
 
   // 5-man OL: each lineman blocks assigned defender
   _startOLBlocker() {
-    this.time.addEvent({ delay: 16, loop: true, callback: () => {
+    this._regTimer(this.time.addEvent({ delay: 16, loop: true, callback: () => {
       if (this.phase !== 'run' && this.phase !== 'run_draw_fake') return;
       const blocked = new Set();
       this.oLine.forEach(ol => {
@@ -867,7 +873,7 @@ export class FieldScene extends Phaser.Scene {
           }
         });
       });
-    }});
+    }}));
   }
 
   _aiRushers(dots) {
@@ -878,7 +884,7 @@ export class FieldScene extends Phaser.Scene {
       const pData = defData.find(p => p.pos === pPos) || { spd: 74 };
       // Tuned: defenders 38-52 px/s — fast enough to pressure, beatable with moves
       const spd = pxs(pData.spd, 38, 0.52) / 60; // convert to per-frame
-      this.time.addEvent({ delay: 16, loop: true, callback: () => {
+      this._regTimer(this.time.addEvent({ delay: 16, loop: true, callback: () => {
         if (this.phase !== 'run') return;
         if (this._engagedCvg?.has(dot)) return; // blocked by blocker
         const dx = this.runner.x - dot.x, dy = this.runner.y - dot.y;
@@ -886,19 +892,19 @@ export class FieldScene extends Phaser.Scene {
         if (dist < 13) { this._tackled(); return; }
         dot.x += (dx/dist)*spd; dot.y += (dy/dist)*spd;
         this._syncLbl(dot);
-      }});
+      }}));
     });
   }
 
   _aiCBsSupport() {
     [this.cb1, this.cb2].forEach(cb => {
-      this.time.addEvent({ delay: 50, loop: true, callback: () => {
+      this._regTimer(this.time.addEvent({ delay: 50, loop: true, callback: () => {
         if (this.phase !== 'run') return;
         const dx = this.runner.x - cb.x, dy = this.runner.y - cb.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist < 13) { this._tackled(); return; }
         if (dist > 90) { cb.x += (dx/dist)*0.55; cb.y += (dy/dist)*0.55; this._syncLbl(cb); }
-      }});
+      }}));
     });
   }
 
@@ -974,6 +980,8 @@ export class FieldScene extends Phaser.Scene {
     let fumCh = Math.max(0.02, (0.055 - (rb.str - 70) * 0.0006) * wxFumM * _wxEscMul * _chemMul);
     if (taps < 2) fumCh = Math.min(0.60, fumCh * 4);
     else if (taps >= 4) fumCh *= 0.25;
+    // INNO I22: safety closes in on long gains — extra strip pressure
+    if(yards>=8){const _sSp=(state.team?.players||[]).find(p=>p.pos==='S')?.spd||74; if(Math.random()<(_sSp/100)*0.18) fumCh=Math.min(0.85,fumCh*2.2);}
     if (Math.random() < fumCh) {
       Sound.incomplete();
       state.stats.team.fum = (state.stats.team.fum || 0) + 1;
@@ -1017,6 +1025,8 @@ export class FieldScene extends Phaser.Scene {
     if(state.possession==='team')this.time.delayedCall(250,()=>this._showNoLookPump());
     // P54: Show QB reads overlay before receivers are clickable
     if (state.possession === 'team') { this._qbReadsActive = true; this._showQBReads(); }
+    // INNO I30: receiver separation dot — green=open, yellow=contested, red=covered
+    if(state.possession==='team') this.time.delayedCall(200,()=>{if(this.phase!=='pass_wait')return;[this.wr1,this.wr2,this.te].forEach(r=>{if(!r?.visible)return;const _nearCB=Math.min(Math.hypot(r.x-(this.cb1?.x||r.x+60),r.y-(this.cb1?.y||r.y)),Math.hypot(r.x-(this.cb2?.x||r.x+60),r.y-(this.cb2?.y||r.y)));const _sc=_nearCB>55?0x22c55e:_nearCB>28?0xfbbf24:0xef4444;const _sg=this.add.circle(r.x,r.y-16,4,_sc,0.8).setDepth(18);this.time.delayedCall(700,()=>_sg?.destroy());});});
     this.time.delayedCall(isAction ? 850 : 550, () => this._buildReceiverTargets(isAction));
     // P93: Second Read Toggle button
     if (state.possession === 'team') {
@@ -1270,6 +1280,19 @@ export class FieldScene extends Phaser.Scene {
   _animateRoutes(variant) {
     const rzMul = (state.yardLine >= 80 && state.possession === 'team') ? 0.52 : 1;
     const depth = ({ quick:32, medium:62, deep:110 }[variant] || 62) * rzMul;
+    // INNO I23: pre-snap route arcs — brief dotted path preview before receivers move
+    if(state.possession==='team'){
+      const _rg=this.add.graphics().setDepth(7).setAlpha(0.55);
+      [{ p:this.wr1, ty: this.wr1.y + (variant==='quick'?22:variant==='deep'?-18:14) },
+       { p:this.wr2, ty: this.wr2.y - (variant==='quick'?22:variant==='deep'?-18:14) },
+       { p:this.te,  ty: this.te.y  + 16 },
+       { p:this.rb,  ty: this.rb.y  - 8  }].forEach(({ p, ty }) => {
+        const txd = p === this.rb ? 24 : p === this.te ? depth*0.65 : depth;
+        _rg.lineStyle(1,0x60a5fa,0.6);
+        _rg.beginPath(); _rg.moveTo(p.x,p.y); _rg.lineTo(p.x+txd, ty); _rg.strokePath();
+      });
+      this.tweens.add({targets:_rg, alpha:0, duration:360, delay:80, onComplete:()=>_rg?.destroy()});
+    }
     [{ p:this.wr1, ty: this.wr1.y + (variant==='quick'?22:variant==='deep'?-18:14) },
      { p:this.wr2, ty: this.wr2.y - (variant==='quick'?22:variant==='deep'?-18:14) },
      { p:this.te,  ty: this.te.y  + 16 },
@@ -1926,6 +1949,8 @@ export class FieldScene extends Phaser.Scene {
     const _calls=['cover2','man','blitz','prevent'];
     const call = this._defDisguise ? _calls[Math.floor(Math.random()*_calls.length)] : (this._defCall || 'cover2');
     this._defDisguise = false;
+    // INNO I26: zone coverage visual — brief arc overlay for Cover2/Prevent
+    if(call==='cover2'||call==='prevent'){const _zvG=this.add.graphics().setDepth(8);_zvG.lineStyle(1,call==='cover2'?0x3b82f6:0x7c3aed,0.35);_zvG.strokeEllipse(FIELD_LEFT+FIELD_W*0.3,FIELD_Y+FIELD_H*0.3,FIELD_W*0.52,FIELD_H*0.55);_zvG.strokeEllipse(FIELD_LEFT+FIELD_W*0.7,FIELD_Y+FIELD_H*0.3,FIELD_W*0.52,FIELD_H*0.55);this.time.delayedCall(900,()=>_zvG?.destroy());}
     // INNO I17: AI personality — adapt strategy to score/down situation
     const _aiScore=state.score.opp, _usScore=state.score.team, _aiDiff=_aiScore-_usScore;
     const _aiIsLosingBig=_aiDiff<-10&&state.quarter>=3;
@@ -1945,6 +1970,11 @@ export class FieldScene extends Phaser.Scene {
     if(_aiPersonality==='conservative') passCh=Math.max(0.12, passCh-0.15); // run heavy to bleed clock
     if(_aiPersonality==='desperate') passCh=Math.min(0.80, passCh+0.20); // pass heavy to catch up
     if (this._aiHurryUp) { this._aiRunSpeed *= 1.08; }
+    // INNO I21: down & distance matrix — tune AI pass tendency per situation
+    if(this.aiDown===2&&this.aiToGo<=3) passCh=Math.min(passCh,0.30);
+    if(this.aiDown===3&&this.aiToGo>=8) passCh=Math.min(0.88,passCh+0.22);
+    if(this.aiDown===3&&this.aiToGo<=3) passCh=Math.max(0.10,passCh-0.20);
+    if(state.yardLine<=15) passCh=Math.min(0.50,passCh);
     if (Math.random() < passCh) { this._startAIPass(); return; }
     this.phase = 'ai_run';
     this._stackItBonus = false;
@@ -2103,14 +2133,14 @@ export class FieldScene extends Phaser.Scene {
     this._show(pursuer, true);
     const pData = (state.team?.players || []).find(p => p.pos === 'LB') || { spd: 74 };
     const spd = pxs(pData.spd, 44, 0.55) / 60;
-    this.time.addEvent({ delay: 16, loop: true, callback: () => {
+    this._regTimer(this.time.addEvent({ delay: 16, loop: true, callback: () => {
       if (this.phase !== 'ai_run') return;
       const dx = this.aiRunner.x - pursuer.x, dy = this.aiRunner.y - pursuer.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
       if (dist < 18) { this._userTackle(); return; }
       pursuer.x += (dx/dist)*spd; pursuer.y += (dy/dist)*spd;
       this._syncLbl(pursuer);
-    }});
+    }}));
   }
 
   _showDefCall(onSelect) {
@@ -2252,6 +2282,8 @@ export class FieldScene extends Phaser.Scene {
   }
 
   _resolveAIPlay(yardsGiven) {
+    // INNO I31: AI 2-min urgency — reduce inter-play delay when AI is trailing late
+    const _i31Urgent = state._drillMode && state.score.opp < state.score.team;
     state.stats.opp.rushYds += yardsGiven;
     state.yardLine = Math.max(1, state.yardLine - yardsGiven);
     this._aiDrivePlays = (this._aiDrivePlays||0) + 1;
@@ -2292,7 +2324,7 @@ export class FieldScene extends Phaser.Scene {
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
     } else if (state.possession==='opp') {
-      this.time.delayedCall(1800, ()=>this._startAIDrive());
+      this.time.delayedCall(_i31Urgent?700:1800, ()=>this._startAIDrive());
     } else {
       this.time.delayedCall(1800, ()=>{
         this._resetFormation(); this._drawLines();
@@ -2790,6 +2822,8 @@ export class FieldScene extends Phaser.Scene {
           this._trailGfx.clear();
           for(let _ti=1;_ti<this._trailPts.length;_ti++){const _ta=(_ti/this._trailPts.length)*0.5;this._trailGfx.lineStyle(3,0xfbbf24,_ta);this._trailGfx.lineBetween(this._trailPts[_ti-1].x,this._trailPts[_ti-1].y,this._trailPts[_ti].x,this._trailPts[_ti].y);}
         }
+        // INNO I32: fatigue visual — dim runner + orange ring when fatigued
+        if(this._runnerData?.id){const _fat=this._fatigue?.[this._runnerData.id]||0;if(_fat>60){this.runner.setAlpha(1-(_fat-60)/200);if(!this._fatRingGfx)this._fatRingGfx=this.add.graphics().setDepth(14);this._fatRingGfx.clear();this._fatRingGfx.lineStyle(2,0xf97316,(_fat-60)/80);this._fatRingGfx.strokeCircle(this.runner.x,this.runner.y,10);}else{this.runner.setAlpha(1);this._fatRingGfx?.clear();}}
         if (this.runner.x>=FIELD_RIGHT||this.runner.y<=FIELD_Y||this.runner.y>=FIELD_Y+FIELD_H) { this._tackled(); return; }
       }
       this.jukeCD-=delta;
@@ -4676,6 +4710,10 @@ export class FieldScene extends Phaser.Scene {
     const _atk=()=>{_ar-=200;if(_ar<=0){cleanup();this._resolveOnsideKick(0);return;}_ael.setText('Auto: '+(_ar/1000).toFixed(1)+'s');this._odTimer=setTimeout(_atk,200);};
     this._odTimer=setTimeout(_atk,200);
   }
+
+  // INNO I24: timer registry helpers — store all loop timers for clean shutdown
+  _regTimer(t){ this._timerRegistry.push(t); return t; }
+  shutdown(){ this._timerRegistry?.forEach(t=>{try{t.remove();}catch{}}); this._timerRegistry=[]; }
 
 }
 
