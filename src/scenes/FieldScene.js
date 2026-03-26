@@ -76,6 +76,10 @@ export class FieldScene extends Phaser.Scene {
     this._thirdDownAtt = 0; this._thirdDownConv = 0; this._thirdHUD = null; this._thirdHUDTxt = null;
     // P74-P78 flags
     this._bumpCovEls = []; this._slideEls = []; this._rzRunEls = []; this._penaltyEls = []; this._twoMinFired1 = false; this._twoMinFired2 = false;
+    // P80 flags: H1 play clock, G4 jump ball, B3 crowd noise, G3 pressure bar
+    this._playClockMs = 0; this._playClockEl = null;
+    this._jmpBonus = 0;
+    this._crowdNoise = false; this._pressureBar = null;
     // V3: speed trail graphics
     this._trailGfx = this.add.graphics().setDepth(3);
     this._trailPts = [];
@@ -86,6 +90,12 @@ export class FieldScene extends Phaser.Scene {
     this._buildThirdDownHUD();
     // P62: roll wind once per game
     const _wdirs=['←','→','↑','↓'];this._wind={dir:_wdirs[Phaser.Math.Between(0,3)],mph:Phaser.Math.Between(3,18)};
+    // E3: persistent wind badge on field
+    if(this._wind.mph>=4)this.add.text(FIELD_RIGHT-58,FIELD_Y-14,`${this._wind.dir} ${this._wind.mph}mph`,{fontSize:'8px',fontFamily:'monospace',color:'#64748b'}).setDepth(12);
+    // B3: crowd noise badge if GM stadium has upgrade
+    if((state.stadiumUpgrades||[]).includes('crowd_noise')){this._crowdNoise=true;this.add.text(FIELD_LEFT+8,FIELD_Y-14,'📢 CROWD',{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#f59e0b'}).setDepth(12);}
+    // H1: play clock text (updated each presnap)
+    this._playClockEl=this.add.text(FIELD_RIGHT-62,FIELD_Y+FIELD_H+22,'',{fontSize:'10px',fontFamily:'monospace',color:'#94a3b8'}).setDepth(12);
     this.time.delayedCall(400, () => this._startKickoffReturn());
   }
 
@@ -279,6 +289,8 @@ export class FieldScene extends Phaser.Scene {
     this.ball.x = this.qb.x; this.ball.y = this.qb.y;
     this.phase = 'presnap';
     this.jukeCD = 0;
+    // H1: reset play clock each snap
+    if(state.possession==='team'){this._playClockMs=40000;this._playClockEl?.setColor('#94a3b8').setText('⏱ 40');}else{this._playClockEl?.setText('');}
     this._spinUsed = false; // P38: reset per play
     this._holdingRoll = false; // P48: reset per play
     this._audibleActive = this._audibleActive||null; // P45: preserve audible across presnap
@@ -939,6 +951,16 @@ export class FieldScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(15);
     // "Throw it" warning fires 900ms after first blocker could be beaten
     this.time.addEvent({ delay: 2900+rushDelay, callback: ()=>{ if(this.phase==='pass_wait') this.pressureTxt?.setText('THROW IT!'); } });
+    // G3: visual pressure bar — fills over rush duration, color shifts red when critical
+    const _pbX=FIELD_RIGHT+12, _pbDur=3600+rushDelay, _pbObj={pct:0};
+    const _pbBg=this.add.rectangle(_pbX,FIELD_Y+FIELD_H/2,8,FIELD_H,0x1e293b,0.7).setDepth(11);
+    const _pbGfx=this.add.graphics().setDepth(12);
+    const _pbLbl=this.add.text(_pbX,FIELD_Y-11,'⚡',{fontSize:'8px',fontFamily:'monospace',color:'#ef4444'}).setOrigin(0.5).setDepth(12);
+    this._pressureBar={bg:_pbBg,gfx:_pbGfx,lbl:_pbLbl};
+    this.tweens.add({targets:_pbObj,pct:1,duration:_pbDur,ease:'Sine.easeIn',
+      onUpdate:()=>{if(!_pbGfx.scene)return;const h=Math.round(FIELD_H*_pbObj.pct);_pbGfx.clear();_pbGfx.fillStyle(_pbObj.pct>0.8?0xef4444:_pbObj.pct>0.5?0xf97316:0xf59e0b,0.82);_pbGfx.fillRect(_pbX-4,FIELD_Y+FIELD_H-h,8,h);},
+      onComplete:()=>{},
+    });
   }
 
   _clearPassRush() {
@@ -946,6 +968,8 @@ export class FieldScene extends Phaser.Scene {
     this._pocketBeaten = [false, false, false, false, false];
     this.pressureTxt?.destroy(); this.pressureTxt = null;
     this._spinBtn?.destroy(); this._spinBtn = null; this._spinBtnTxt?.destroy(); this._spinBtnTxt = null;
+    // G3: destroy pressure bar
+    this._pressureBar?.bg?.destroy(); this._pressureBar?.gfx?.destroy(); this._pressureBar?.lbl?.destroy(); this._pressureBar = null;
   }
 
   // P38: QB Scramble Spin Move — show SPIN button when DL within 40px during pass_wait
@@ -1131,14 +1155,28 @@ export class FieldScene extends Phaser.Scene {
     this.pressureTxt?.destroy();
     const qteBonus = isOpen ? 1.18+Math.random()*0.18 : 0.38+Math.random()*0.14;
     const sx=this.ball.x, sy=this.ball.y, ex=receiverDot.x, ey=receiverDot.y;
-    const peakY = Math.min(sy,ey)-38;
+    // E3: wind drift on deep passes (cross-wind shifts y-landing)
+    const _wdY=(this.passVariant==='deep'&&this._wind&&this._wind.mph>8)?((this._wind.dir==='↑'?-1:this._wind.dir==='↓'?1:0)*(this._wind.mph-8)*1.4):0;
+    const eyW=ey+_wdY;
+    const peakY = Math.min(sy,eyW)-38;
     let t=0; const dur=380;
     const arc = this.time.addEvent({ delay:16, loop:true, callback:()=>{
       t+=16/dur; if(t>1){arc.remove();this._clearArc();return;}
-      const bx=Phaser.Math.Linear(sx,ex,t), by=(1-t)*(1-t)*sy+2*(1-t)*t*peakY+t*t*ey;
+      const bx=Phaser.Math.Linear(sx,ex,t), by=(1-t)*(1-t)*sy+2*(1-t)*t*peakY+t*t*eyW;
       this.ball.x=bx; this.ball.y=by;
       this.arcGfx.clear(); this.arcGfx.lineStyle(1,0xfbbf24,0.5); this.arcGfx.lineBetween(sx,sy,bx,by);
     }});
+    // G4: jump ball LEAP button for deep passes — uses WR jmp attribute
+    if(this.passVariant==='deep'&&state.possession==='team'){
+      const _wrData=(state.team?.players||[]).find(p=>p.pos==='WR');
+      const _jmpEl=[]; const _jW=this.scale.width;
+      const _jBg=this.add.rectangle(_jW/2,FIELD_Y+FIELD_H+24,92,24,0x7c3aed,1).setDepth(23).setInteractive({useHandCursor:true});
+      const _jTx=this.add.text(_jW/2,FIELD_Y+FIELD_H+24,'🤸 LEAP!',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(24);
+      _jmpEl.push(_jBg,_jTx);
+      const _jClean=()=>_jmpEl.forEach(e=>{try{e.destroy();}catch{}});
+      _jBg.once('pointerdown',()=>{this._jmpBonus=((_wrData?.jmp||70)-65)*0.008+0.14;_jClean();this._tdFlash('🤸 LEAP!','#a78bfa');});
+      this.time.delayedCall(dur+40,()=>_jClean());
+    }
     this.time.delayedCall(dur+50, ()=>{ this._clearArc(); this._resolvePlay(qteBonus, isOpen?'complete':'covered'); });
   }
 
@@ -1199,6 +1237,14 @@ export class FieldScene extends Phaser.Scene {
         // P54: expanded audible hot-route bonus
         const audibleRoute = this._activeAudible ? AUDIBLE_ROUTES[this._activeAudible] : null;
         if (audibleRoute) { compCh = clamp(compCh + audibleRoute.passBonus, 0.10, 0.92); }
+        // B4: QB personality modifiers — 'clutch' +8% in Q4; 'money' -8% when fatigued
+        const _qbPerso=qb.personality;
+        if(_qbPerso==='clutch'&&state.quarter>=4)compCh=Math.min(0.92,compCh+0.08);
+        if(_qbPerso==='money'&&(this._fatigue[qb.id]||0)>70)compCh=Math.max(0.10,compCh-0.08);
+        // B3: crowd noise home field — -5% comp for opponent when crowd upgrade active
+        if(this._crowdNoise&&state.possession!=='team')compCh=Math.max(0.05,compCh-0.05);
+        // G4: jump ball — tap LEAP on a covered deep pass to boost completion via WR jmp
+        if(this._jmpBonus){if(type==='covered'&&Math.random()<this._jmpBonus){type='complete';qteBonus=Math.max(qteBonus,0.85);}this._jmpBonus=0;}
         if (type==='covered' && Math.random()<intCh*2) {
           Sound.int(); state.stats.team.int++;
           this._track(qb.id,'int',1);
@@ -2319,6 +2365,13 @@ export class FieldScene extends Phaser.Scene {
       if(!this._audibleMenuShown)this._showAudibleMenu();
     } else if(this.phase!=='presnap'&&this._audibleMenuShown){
       this._audibleMenuElems.forEach(e=>{try{e.destroy();}catch{}});this._audibleMenuElems=[];this._audibleMenuShown=false;
+    }
+    // H1: play clock countdown during presnap user offense
+    if(this.phase==='presnap'&&state.possession==='team'&&this._playClockMs>0){
+      this._playClockMs-=delta;
+      const _pcs=Math.ceil(this._playClockMs/1000);
+      this._playClockEl?.setColor(_pcs<=5?'#ef4444':_pcs<=10?'#f59e0b':'#94a3b8').setText(`⏱ ${_pcs}`);
+      if(this._playClockMs<=0){this._playClockMs=-1;this.phase='result';Sound.whistle?.();this._tdFlash('⏱ DELAY OF GAME — 5 yds','#f59e0b');this._endPlay({yards:-5,text:'Delay of Game. 5-yard penalty.',type:'penalty',turnover:false,td:false});}
     }
 
     // USER OFFENSE — run

@@ -75,16 +75,20 @@ export class GameOverScene extends Phaser.Scene {
       });
     }
 
-    // Drive chart
+    // Drive chart — GO3: horizontal bar chart (width=yards gained, color=result)
     if (state.drives && state.drives.length) {
       this.add.text(W/2, 348, 'DRIVE CHART', { fontSize:'7px', fontFamily:'monospace', fontStyle:'bold', color:'#334155', letterSpacing:3 }).setOrigin(0.5);
+      const maxYd = Math.max(1, ...state.drives.map(d=>d.yards||1));
       let tRow=0, oRow=0;
       state.drives.slice(0,10).forEach(d => {
         const isTeam = d.poss==='team';
         const row = isTeam ? tRow++ : oRow++;
         const x = isTeam ? W/2-190 : W/2+10;
-        const col = (d.result==='TD'||d.result==='FG') ? '#22c55e' : (d.result==='INT'||d.result==='FUM') ? '#ef4444' : '#475569';
-        this.add.text(x, 358+row*12, `${d.plays}pl · ${d.yards}yd → ${d.result}`, { fontSize:'8px', fontFamily:'monospace', color:col });
+        const clrH = (d.result==='TD'||d.result==='FG') ? 0x22c55e : (d.result==='INT'||d.result==='FUM') ? 0xef4444 : 0x475569;
+        const clrT = (d.result==='TD'||d.result==='FG') ? '#22c55e' : (d.result==='INT'||d.result==='FUM') ? '#ef4444' : '#475569';
+        const barW = Math.max(4, Math.round((d.yards||0)/maxYd*174));
+        this.add.rectangle(x+barW/2, 358+row*13, barW, 7, clrH, 0.75).setOrigin(0.5);
+        this.add.text(x, 358+row*13+1, `${d.yards||0}yd→${d.result}`, { fontSize:'7px', fontFamily:'monospace', color:clrT });
       });
     }
 

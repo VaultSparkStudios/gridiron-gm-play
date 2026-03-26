@@ -8,10 +8,11 @@ export class BootScene extends Phaser.Scene {
   create() {
     const W = this.scale.width, H = this.scale.height;
     resetState();
-    const { team, opponent, week, season, gameId } = loadRoster();
+    const { team, opponent, week, season, gameId, stadiumUpgrades } = loadRoster();
     state.team = team;
     state.opponent = opponent;
     state.gameId = gameId || null;
+    state.stadiumUpgrades = stadiumUpgrades || [];
     const wxRoll = Math.random();
     state.weather = wxRoll < 0.60 ? 'clear' : wxRoll < 0.83 ? 'rain' : 'snow';
     track('game_boot', { week: week||0, season: season||0 });
