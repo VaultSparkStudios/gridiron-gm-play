@@ -41,7 +41,7 @@ export function loadRoster() {
     if (raw) {
       const data = JSON.parse(raw);
       // Normalize — GM exports {team, opponent} or a raw team object
-      if (data.team && data.opponent) return { team: data.team, opponent: data.opponent, week: data.week, season: data.season, gameId: data.gameId || null, stadiumUpgrades: data.stadiumUpgrades || [], streak: data.streak || 0, difficulty: data.difficulty || 'normal', isRival: data.isRival || false, chemistry: data.chemistry || 75 };
+      if (data.team && data.opponent) return { team: data.team, opponent: data.opponent, week: data.week, season: data.season, gameId: data.gameId || null, stadiumUpgrades: data.stadiumUpgrades || [], streak: data.streak || 0, difficulty: data.difficulty || 'normal', isRival: data.isRival || false, chemistry: data.chemistry || 75, _bridgeTs: data._ts || null };
       // Single team object from older export format
       if (data.players) return { team: data, opponent: DEFAULT_OPPONENT };
     }
