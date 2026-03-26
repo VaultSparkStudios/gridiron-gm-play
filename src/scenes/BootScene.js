@@ -121,6 +121,32 @@ export class BootScene extends Phaser.Scene {
     const _dClr   = { casual:'#22c55e', rookie:'#22c55e', standard:'#3b82f6', normal:'#3b82f6', veteran:'#f59e0b', hardcore:'#ef4444', hof:'#ef4444' }[state.difficulty]||'#3b82f6';
     this.add.text(W - 10, 10, `${_dLabel}`, { fontSize:'7px', fontFamily:'monospace', fontStyle:'bold', color:_dClr, letterSpacing:2 }).setOrigin(1,0);
 
+    // INNO I76: settings gear button — opens volume control overlay
+    const _settBtn=this.add.text(14,10,'⚙',{fontSize:'16px',color:'#334155'}).setDepth(12).setInteractive({useHandCursor:true});
+    _settBtn.on('pointerover',()=>_settBtn.setColor('#94a3b8'));
+    _settBtn.on('pointerout',()=>_settBtn.setColor('#334155'));
+    _settBtn.on('pointerdown',()=>{
+      const _sv=this.add.rectangle(W/2,H/2,220,120,0x0d1424).setDepth(50).setStrokeStyle(1,0x334155).setInteractive();
+      const _svTx=this.add.text(W/2,H/2-40,'⚙ SETTINGS',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#f1f5f9'}).setOrigin(0.5).setDepth(51);
+      const _curVol=parseFloat(localStorage.getItem('gm_vol')||'0.3');
+      const _svVLbl=this.add.text(W/2-70,H/2-16,'SFX VOL:',{fontSize:'8px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0,0.5).setDepth(51);
+      const _svVVal=this.add.text(W/2+30,H/2-16,Math.round(_curVol*100)+'%',{fontSize:'8px',fontFamily:'monospace',color:'#22c55e'}).setOrigin(0,0.5).setDepth(51);
+      const _svDn=this.add.text(W/2+60,H/2-16,'▼',{fontSize:'10px',fontFamily:'monospace',color:'#f59e0b'}).setOrigin(0.5).setDepth(51).setInteractive({useHandCursor:true});
+      const _svUp=this.add.text(W/2+80,H/2-16,'▲',{fontSize:'10px',fontFamily:'monospace',color:'#22c55e'}).setOrigin(0.5).setDepth(51).setInteractive({useHandCursor:true});
+      let _vol=_curVol;
+      _svDn.on('pointerdown',()=>{_vol=Math.max(0,_vol-0.1);localStorage.setItem('gm_vol',_vol.toFixed(1));_svVVal.setText(Math.round(_vol*100)+'%');});
+      _svUp.on('pointerdown',()=>{_vol=Math.min(1,_vol+0.1);localStorage.setItem('gm_vol',_vol.toFixed(1));_svVVal.setText(Math.round(_vol*100)+'%');});
+      const _svClose=this.add.text(W/2,H/2+36,'CLOSE',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',backgroundColor:'#0d1424',padding:{x:10,y:4}}).setOrigin(0.5).setDepth(51).setInteractive({useHandCursor:true});
+      _svClose.on('pointerdown',()=>{[_sv,_svTx,_svVLbl,_svVVal,_svDn,_svUp,_svClose].forEach(e=>e?.destroy());});
+    });
+
+    // INNO I79: bridge validation indicator
+    const _bridgeRaw=localStorage.getItem('gm_roster_export');
+    const _bridgeAge=_bridgeRaw?((Date.now()-(JSON.parse(_bridgeRaw)._ts||0))):Infinity;
+    const _bridgeClr=!_bridgeRaw?'#ef4444':_bridgeAge<3600000?'#22c55e':'#f59e0b';
+    const _bridgeTxt=!_bridgeRaw?'DEFAULT ROSTER':_bridgeAge<3600000?'GM LIVE':'GM STALE';
+    this.add.text(W/2,H/2+26,`● ${_bridgeTxt}`,{fontSize:'7px',fontFamily:'monospace',color:_bridgeClr}).setOrigin(0.5);
+
     // Kick Off button
     const btn = this.add.rectangle(W/2, H/2 + 100, 210, 46, 0x22c55e).setInteractive({ useHandCursor:true });
     this.add.text(W/2, H/2 + 100, 'KICK OFF', {
@@ -134,8 +160,19 @@ export class BootScene extends Phaser.Scene {
       this.scene.bringToTop('Hud');
     });
 
+    // INNO I59: practice drill mode button
+    const _practBtn=this.add.rectangle(W/2,H/2+130,130,30,0x1e293b).setInteractive({useHandCursor:true}).setStrokeStyle(1,0x334155);
+    this.add.text(W/2,H/2+130,'⚡ PRACTICE',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#60a5fa'}).setOrigin(0.5);
+    _practBtn.on('pointerover',()=>_practBtn.setFillStyle(0x1e3a5f));
+    _practBtn.on('pointerout',()=>_practBtn.setFillStyle(0x1e293b));
+    _practBtn.on('pointerdown',()=>{
+      state.difficulty='rookie'; state.streak=0; state._drillMode=true;
+      state.score={team:0,opp:0}; state.plays=0; state.quarter=1;
+      this.scene.start('Field'); this.scene.start('Hud'); this.scene.bringToTop('Hud');
+    });
+
     this.add.text(W/2, H - 24,
-      'WASD / Arrows to move  •  SPACE to juke  •  Click receivers to throw',
+      'WASD / Arrows to move  •  SPACE to juke  •  Click receivers to throw  •  ⚡ PRACTICE for drills',
       { fontSize:'10px', fontFamily:'monospace', color:'#334155' }
     ).setOrigin(0.5);
   }

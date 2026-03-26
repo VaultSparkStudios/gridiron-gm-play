@@ -93,6 +93,10 @@ export class HudScene extends Phaser.Scene {
     }).setOrigin(0,0).setDepth(19);
     this._drawDriveChart();
 
+    // INNO I60: crowd reaction meter — fills based on momentum (score delta proxy)
+    this._crowdBg  = this.add.rectangle(4, HH+24, W-8, 6, 0x1e293b, 0.6).setOrigin(0, 0.5).setDepth(11);
+    this._crowdBar = this.add.rectangle(4, HH+24, 0, 6, 0x22c55e, 0.7).setOrigin(0, 0.5).setDepth(12);
+
     // ── EVENT LISTENERS ────────────────────────────────────────────────────
     const field=this.scene.get('Field');
     if(field){
@@ -148,6 +152,11 @@ export class HudScene extends Phaser.Scene {
       const pBar = this.add.rectangle(_isOppScore ? this.scale.width-3 : 3, 26, 5, 44, pulseClr, 1).setDepth(25);
       this.tweens.add({ targets:pBar, alpha:0, duration:600, onComplete:()=>pBar.destroy() });
     }
+    // INNO I60: update crowd bar from score delta proxy
+    {const _scoreDelta=Math.min(100,Math.max(0,50+(state.score.team-state.score.opp)*4));
+    const _crowdW=Math.round((W-8)*(_scoreDelta/100));
+    const _crowdCol=_scoreDelta>70?0x22c55e:_scoreDelta>40?0xf59e0b:0xef4444;
+    this._crowdBar?.setSize(_crowdW,6)?.setFillStyle(_crowdCol,0.7);}
     // INNO I36: append play to drive chart
     if(state.possession==='team'){
       const _type = result.td?'td':result.turnover?'to':result.yards>0?'gain':'loss';

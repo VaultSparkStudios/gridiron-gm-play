@@ -48,6 +48,16 @@ export class PlayCallScene extends Phaser.Scene {
       fontSize:'10px', fontFamily:'monospace', color:'#64748b'
     }).setOrigin(0.5, 0).setDepth(32);
 
+    // INNO I57: coach headset quote based on situation
+    const _quotes=[
+      'Take what they give you.','Trust the process.','Protect the ball.','Make your reads.',
+      'Execution wins games.','Know your assignments.','One play at a time.','Finish strong.',
+      'Attack the weakness.','Clock management is key.','Stay disciplined.','Set the edge.',
+    ];
+    const _dn=state.down,_tg=state.toGo;
+    const _sitQ=_dn===3&&_tg>=8?'Attack the weakness.':_dn===1?'Take what they give you.':_dn===4?'Finish strong.':_quotes[Math.floor(Math.random()*_quotes.length)];
+    this.add.text(px, py - panelH/2 + 46, `💬 "${_sitQ}"`,{fontSize:'7px',fontFamily:'monospace',color:'#334155',fontStyle:'italic'}).setOrigin(0.5,0).setDepth(32);
+
     const btnW=166, btnH=38, startY = py - panelH/2 + 68;
     this.add.text(px - 96, startY - 12, '🦶 RUN',  { fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#f59e0b' }).setOrigin(0.5,0).setDepth(32);
     this.add.text(px + 96, startY - 12, '🏈 PASS', { fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#3b82f6' }).setOrigin(0.5,0).setDepth(32);

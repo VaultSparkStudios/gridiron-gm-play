@@ -4,7 +4,7 @@ const EP = import.meta.env.VITE_ANALYTICS_URL || '';
 export const track = (event, extra = {}) => {
   if (!EP) return;
   try {
-    const payload = JSON.stringify({ e: event, v: 'P10', t: Date.now(), ...extra });
+    const payload = JSON.stringify({ e: event, v: 'P119', t: Date.now(), ...extra });
     if (navigator.sendBeacon) navigator.sendBeacon(EP, payload);
     else fetch(EP, { method:'POST', body:payload, keepalive:true }).catch(()=>{});
   } catch {}

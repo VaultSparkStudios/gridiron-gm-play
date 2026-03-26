@@ -146,6 +146,46 @@ export class GameOverScene extends Phaser.Scene {
       fontSize:'9px', fontFamily:'monospace', color:'#334155'
     }).setOrigin(0.5);
 
+    // INNO I78: cross-play personal records
+    try{
+      const _pr=JSON.parse(localStorage.getItem('gm_play_records')||'{}');
+      const _newPR={};
+      const _ts=state.stats?.team;
+      if(_ts){
+        if((_ts.passYds||0)>(_pr.passYds||0)){_newPR.passYds=_ts.passYds;}
+        if((_ts.rushYds||0)>(_pr.rushYds||0)){_newPR.rushYds=_ts.rushYds;}
+        if((_ts.td||0)>(_pr.td||0)){_newPR.td=_ts.td;}
+      }
+      const _merged={..._pr,..._newPR};
+      localStorage.setItem('gm_play_records',JSON.stringify(_merged));
+      const _prParts=[];
+      if(_merged.passYds)_prParts.push(`PASS BEST: ${_merged.passYds}yd`);
+      if(_merged.rushYds)_prParts.push(`RUSH BEST: ${_merged.rushYds}yd`);
+      if(_merged.td)_prParts.push(`TD BEST: ${_merged.td}`);
+      if(_prParts.length){
+        this.add.text(W/2,413,`🏅 ${_prParts.join('  •  ')}`,{fontSize:'8px',fontFamily:'monospace',color:'#60a5fa'}).setOrigin(0.5);
+        Object.keys(_newPR).forEach(()=>{
+          const _badge=this.add.text(W/2,402,'✨ NEW RECORD!',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24'}).setOrigin(0.5);
+          this.tweens.add({targets:_badge,alpha:0,duration:1200,delay:600,onComplete:()=>_badge?.destroy()});
+        });
+      }
+    }catch{}
+
+    // INNO I55: highlight reel — replay best play as animated dot tween
+    if(state.bestPlay){
+      const _rlY=380;
+      const _rlBall=this.add.circle(W/2-90,_rlY,5,0xfbbf24).setDepth(10).setAlpha(0);
+      this.time.delayedCall(800,()=>{
+        this.tweens.add({targets:_rlBall,alpha:1,duration:200});
+        this.tweens.add({targets:_rlBall,x:W/2+90,y:_rlY-18,duration:900,ease:'Sine.easeOut',
+          onComplete:()=>{
+            this.add.text(W/2,_rlY+10,'⭐ BEST PLAY REPLAYED',{fontSize:'7px',fontFamily:'monospace',color:'#f59e0b'}).setOrigin(0.5);
+            this.tweens.add({targets:_rlBall,alpha:0,duration:300});
+          }
+        });
+      });
+    }
+
     // Buttons
     const playAgain = this.add.rectangle(W/2-90, 430, 160, 40, 0x22c55e).setInteractive({ useHandCursor:true });
     this.add.text(W/2-90, 430, 'PLAY AGAIN', { fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#fff' }).setOrigin(0.5);

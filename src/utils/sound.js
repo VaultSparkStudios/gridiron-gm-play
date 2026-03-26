@@ -9,11 +9,13 @@ export const Sound = {
   },
   play(freq, type = 'square', dur = 0.12, vol = 0.3) {
     try {
+      // INNO I76: scale volume by user setting
+      const _sv=parseFloat(localStorage.getItem('gm_vol')||'1');
       const ctx = this._get(); if (!ctx) return;
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.connect(g); g.connect(ctx.destination);
       o.type = type; o.frequency.value = freq;
-      g.gain.setValueAtTime(vol, ctx.currentTime);
+      g.gain.setValueAtTime(vol*_sv, ctx.currentTime);
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
       o.start(); o.stop(ctx.currentTime + dur);
     } catch {}

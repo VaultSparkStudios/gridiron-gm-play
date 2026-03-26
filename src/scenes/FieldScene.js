@@ -100,6 +100,16 @@ export class FieldScene extends Phaser.Scene {
     this._jmpBonus = 0;
     // INNO I24: timer registry for clean scene shutdown; I32: fatigue visual ring
     this._timerRegistry = []; this._fatRingGfx = null;
+    // INNO I51: user-controlled defensive dot during AI drives
+    this._userDefActive = false; this._userDefDot = null;
+    // INNO I52: half-time adjustment card selection
+    this._htAdj = null;
+    // INNO I56: mid-game weather progression flag
+    this._wxProgressed = false;
+    // INNO I61: AI no-repeat call log
+    this._aiCallLog = [];
+    // INNO I64: defensive pressure ring blitz bonus
+    this._blitzPressureBonus = 0;
     this._crowdNoise = false; this._pressureBar = null;
     // Tendency tracker: rolling window of last 6 calls ('run'|'pass') for AI counter-calling
     this._callHistory = [];
@@ -163,9 +173,12 @@ export class FieldScene extends Phaser.Scene {
   // ─── FIELD ────────────────────────────────────────────────────────────────
 
   _drawField() {
+    // INNO I63: night game mode for rival/playoff games
+    const _nightMode = state.isRival && Math.random()<0.5;
+    this._nightMode = _nightMode;
     const g=this.add.graphics();
     // === ALTERNATING GRASS STRIPS (10-yard bands like broadcast view) ===
-    for(let i=0;i<10;i++){g.fillStyle(i%2===0?0x14532d:0x165e34,1);g.fillRect(FIELD_LEFT+i*60,FIELD_Y,60,FIELD_H);}
+    for(let i=0;i<10;i++){g.fillStyle(i%2===0?(_nightMode?0x0a1f12:0x14532d):(_nightMode?0x0c2818:0x165e34),1);g.fillRect(FIELD_LEFT+i*60,FIELD_Y,60,FIELD_H);}
     // === END ZONES ===
     g.fillStyle(0x0c3018,1);
     g.fillRect(0,FIELD_Y,FIELD_LEFT,FIELD_H);
@@ -384,6 +397,9 @@ export class FieldScene extends Phaser.Scene {
   }
 
   _resetFormation() {
+    // INNO I51: clean up user safety dot on formation reset
+    this._userDefActive=false; this._userDefLbl?.destroy(); this._userDefLbl=null;
+    if(this._userDefDot)this._show(this._userDefDot,false);
     const lx = yardToX(state.yardLine), cy = FIELD_Y + FIELD_H / 2;
     // Restore original labels
     [...this.offPlayers, ...this.defPlayers].forEach(d => { if (d._lbl && d._origLabel) d._lbl.setText(d._origLabel); });
@@ -810,6 +826,13 @@ export class FieldScene extends Phaser.Scene {
     this._flashCarrierName(this.runner, pData.name?.split(' ').pop()||(isScramble?'QB':'RB'));
 
     if (isDraw) {
+      // INNO I65: snap count fake visual — QB counts before handoff
+      if(isDraw&&state.possession==='team'){
+        let _cnt=0;
+        const _cEl=this.add.text(this.qb.x-14,this.qb.y-20,'',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24'}).setDepth(20);
+        const _cTk=this.time.addEvent({delay:120,repeat:2,callback:()=>{_cnt++;_cEl.setText(`${_cnt}...`);}});
+        this.time.delayedCall(380,()=>{_cEl?.destroy();});
+      }
       this.phase = 'run_draw_fake';
       this.tweens.add({ targets: this.qb, x: this.qb.x - 10, duration: 260, yoyo: true,
         onUpdate: () => this._syncLbl(this.qb),
@@ -831,6 +854,19 @@ export class FieldScene extends Phaser.Scene {
 
     Sound.whistle();
     this.events.emit('phaseChange', 'run');
+    // INNO I62: run hole reading — flash gap indicators between OL dots
+    if(state.possession==='team'){
+      const _rhG=this.add.graphics().setDepth(9);
+      const _gaps=[[this.lt,this.lg],[this.lg,this.c],[this.c,this.rg],[this.rg,this.rt]];
+      _gaps.forEach(([a,b])=>{
+        if(!a?.visible||!b?.visible)return;
+        const _mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+        const _nearDef=this.defPlayers.some(d=>d.visible&&Math.hypot(d.x-_mid.x,d.y-_mid.y)<28);
+        _rhG.fillStyle(_nearDef?0xef4444:0x22c55e,0.55);
+        _rhG.fillTriangle(_mid.x-5,_mid.y+6,_mid.x+5,_mid.y+6,_mid.x,_mid.y-6);
+      });
+      this.time.delayedCall(300,()=>_rhG?.destroy());
+    }
     // P83: Crack block 20% chance on runs
     if(!isScramble&&state.possession==='team')this._tryCrackBlock(()=>{});
     // P75: Scramble Slide option inside own 20
@@ -1454,6 +1490,8 @@ export class FieldScene extends Phaser.Scene {
           base = 2 + ((rb.spd - 70) * 0.10 * fatMul) + Phaser.Math.Between(-1, 5) + _tendRunPen;
         }
         yards = Math.round(base * qteBonus);
+        // INNO I52 applied: run-first adjustment adds rush yards base
+        if(this._htAdj==='run')yards=Math.round(yards+8*Math.random());
         // INNO I15 [SIL]: trick play memory — defense keys on end around repeat
         if(this._trickMemCovPenalty&&this._endAroundActive){yards=Math.max(-2,yards-3);}
       } else if (isPass) {
@@ -1495,6 +1533,8 @@ export class FieldScene extends Phaser.Scene {
         // P54: expanded audible hot-route bonus
         const audibleRoute = this._activeAudible ? AUDIBLE_ROUTES[this._activeAudible] : null;
         if (audibleRoute) { compCh = clamp(compCh + audibleRoute.passBonus, 0.10, 0.92); }
+        // INNO I52 applied: quick strikes adjustment
+        if(this._htAdj==='quick'&&(this.passVariant==='quick'||variant==='quick'||variant==='medium'))compCh=Math.min(0.96,compCh+0.05);
         // P84: pump fake bonus +10% comp
         if(this._pumpFakeBonus){compCh=Math.min(0.92,compCh+this._pumpFakeBonus);this._pumpFakeBonus=0;}
         // P106: no-look pump fake bonus +14% comp
@@ -1654,6 +1694,12 @@ export class FieldScene extends Phaser.Scene {
     if (result.td) {
       driveEnd = 'TD';
       state.score.team += 6; state.yardLine=25; state.down=1; state.toGo=10; state.possession='team';
+      // INNO I58: end zone celebration — dot spins and ball arcs on TD
+      if(this.runner){
+        this.tweens.add({targets:this.runner,angle:360,duration:480,ease:'Quad.easeOut',onComplete:()=>{this.runner.angle=0;}});
+        const _cb=this.add.circle(this.runner.x,this.runner.y,5,0xfbbf24).setDepth(16);
+        this.tweens.add({targets:_cb,y:this.runner.y-32,alpha:0,duration:500,onComplete:()=>_cb?.destroy()});
+      }
       this._pendingPAT = result.type === 'td'; // user TD only; AI TD goes through _aiTouchdown
     } else if (result.turnover) {
       driveEnd = result.type==='int'?'INT':result.type==='fumble'?'FUM':result.type==='fg'?'FG':result.type==='fg_miss'?'NO FG':'PUNT';
@@ -1707,6 +1753,20 @@ export class FieldScene extends Phaser.Scene {
   }
 
   _afterPlay() {
+    // INNO I56: mid-game weather progression check for user plays
+    if(state.quarter>=3&&!this._wxProgressed){
+      this._wxProgressed=true;
+      const _wxUp={clear:'rain',rain:'snow',snow:'snow'};
+      if(Math.random()<0.25){
+        const _newWx=_wxUp[state.weather];
+        if(_newWx&&_newWx!==state.weather){
+          state.weather=_newWx;
+          const _W=this.scale.width;
+          const _wxT=this.add.text(_W/2,FIELD_Y+40,`🌧 WEATHER CHANGE — ${_newWx.toUpperCase()}`,{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#93c5fd',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(25);
+          this.time.delayedCall(2000,()=>_wxT?.destroy());
+        }
+      }
+    }
     if (!state._halfShown && state.quarter>=3 && !this._pendingPAT) { state._halfShown=true; this.time.delayedCall(1600,()=>this._showHalftime()); return; }
     if (state.quarter>4 || state.plays>=40) {
       // P60: overtime on tie
@@ -1975,12 +2035,29 @@ export class FieldScene extends Phaser.Scene {
     if(this.aiDown===3&&this.aiToGo>=8) passCh=Math.min(0.88,passCh+0.22);
     if(this.aiDown===3&&this.aiToGo<=3) passCh=Math.max(0.10,passCh-0.20);
     if(state.yardLine<=15) passCh=Math.min(0.50,passCh);
-    if (Math.random() < passCh) { this._startAIPass(); return; }
+    // INNO I61: AI no-repeat — prevent 3 consecutive same play type
+    const _aiLast3=(this._aiCallLog||[]).slice(-3);
+    const _allRun=_aiLast3.length>=3&&_aiLast3.every(t=>t==='run');
+    const _allPass=_aiLast3.length>=3&&_aiLast3.every(t=>t==='pass');
+    if(_allRun) passCh=Math.max(passCh,0.72); // force pass
+    if(_allPass) passCh=Math.min(passCh,0.28); // force run
+    const _aiCallType=Math.random()<passCh?'pass':'run';
+    this._aiCallLog=[...(this._aiCallLog||[]).slice(-4),_aiCallType];
+    if (_aiCallType==='pass') { this._startAIPass(); return; }
     this.phase = 'ai_run';
     this._stackItBonus = false;
     const hud = this.scene.get('Hud');
     hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange', 'opp');
     Sound.whistle();
+    // INNO I51: give user a controllable S dot to defend
+    this._userDefActive=true;
+    const _udX=FIELD_LEFT+80, _udY=FIELD_Y+FIELD_H/2;
+    this._userDefDot=this._userDefDot||this.add.circle(_udX,_udY,8,0x60a5fa).setDepth(12);
+    this._place(this._userDefDot,_udX,_udY); this._show(this._userDefDot,true);
+    const _udLbl=this.add.text(_udX,_udY,'S',{fontSize:'7px',fontFamily:'monospace',color:'#fff'}).setOrigin(0.5).setDepth(13);
+    this._userDefLbl=_udLbl;
+    const _udHint=this.add.text(this.scale.width/2,FIELD_Y+FIELD_H+14,'WASD to move your Safety — tackle the runner!',{fontSize:'9px',fontFamily:'monospace',color:'#60a5fa'}).setOrigin(0.5).setDepth(20);
+    this.time.delayedCall(2400,()=>_udHint?.destroy());
     // P63: show defensive run stop button
     this.time.delayedCall(300,()=>this._showDefRunStop());
   }
@@ -2008,6 +2085,15 @@ export class FieldScene extends Phaser.Scene {
     const hud=this.scene.get('Hud');
     hud?.events?.emit('resetHud'); hud?.events?.emit('possessionChange','opp');
     Sound.whistle();
+    // INNO I64: pressure ring — shrinks toward AI QB; BLITZ at close range = bonus sack
+    {const _prG=this.add.graphics().setDepth(9); let _prR=100; let _prDone=false;
+    this._regTimer(this.time.addEvent({delay:32,loop:true,callback:()=>{
+      if(this.phase!=='ai_pass'||_prDone){_prG?.destroy();return;}
+      _prR-=4; _prG.clear();
+      _prG.lineStyle(1.5,_prR<40?0xef4444:0xf59e0b,0.5);
+      _prG.strokeCircle(this.dl.x,this.dl.y,Math.max(10,_prR));
+      if(_prR<=30&&!_prDone){_prDone=true;this._blitzPressureBonus=(this._blitzPressureBonus||0)+0.15;_prG?.destroy();}
+    }}));}
     this._passRushMode = false; this._passRushCoverBreak = false;
     // P66: Rush Lane choice
     this._rushLaneBonus = null;
@@ -2045,7 +2131,9 @@ export class FieldScene extends Phaser.Scene {
     const _rlSackBonus = this._rushLaneBonus?.sackCh||0;
     const _rlCovBonus = this._rushLaneBonus?.covCh||0;
     this._rushLaneBonus=null;
-    if (dist < 22 || (dist < 40 && _rlSackBonus>0 && Math.random()<_rlSackBonus)) {
+    // INNO I64: apply pressure ring blitz bonus to sack check
+    const _prSackBonus=this._blitzPressureBonus||0; this._blitzPressureBonus=0;
+    if (dist < 22 || (dist < 40 && (_rlSackBonus>0||_prSackBonus>0) && Math.random()<(_rlSackBonus+_prSackBonus))) {
       this.phase = 'result';
       Sound.tackle?.() || Sound.whistle?.();
       this._tdFlash('SACK! QB DOWN 🏈','#22c55e');
@@ -2320,6 +2408,20 @@ export class FieldScene extends Phaser.Scene {
     this.events.emit('playResult', result);
     const hud = this.scene.get('Hud');
     hud?.events?.emit('playResult', result); hud?.events?.emit('possessionChange',state.possession);
+    // INNO I56: mid-game weather progression — 25% chance weather worsens at Q3
+    if(state.quarter>=3&&!this._wxProgressed){
+      this._wxProgressed=true;
+      const _wxUp={clear:'rain',rain:'snow',snow:'snow'};
+      if(Math.random()<0.25){
+        const _newWx=_wxUp[state.weather];
+        if(_newWx&&_newWx!==state.weather){
+          state.weather=_newWx;
+          const _W=this.scale.width;
+          const _wxT=this.add.text(_W/2,FIELD_Y+40,`🌧 WEATHER CHANGE — ${_newWx.toUpperCase()}`,{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#93c5fd',stroke:'#000',strokeThickness:2}).setOrigin(0.5).setDepth(25);
+          this.time.delayedCall(2000,()=>_wxT?.destroy());
+        }
+      }
+    }
     if (!state._halfShown && state.quarter>=3) { state._halfShown=true; this.time.delayedCall(1600,()=>this._showHalftime()); return; }
     if (state.quarter>4 || state.plays>=40) {
       this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
@@ -2385,6 +2487,27 @@ export class FieldScene extends Phaser.Scene {
     if(this._weatherEscalated){const _wxWarn=this.add.text(W/2,H/2+96,`⚠ ${state.weather==='snow'?'SNOW':'RAIN'} INTENSIFIES — fumble risk up 2nd half`,{fontSize:'8px',fontFamily:'monospace',fontStyle:'bold',color:'#ef4444'}).setOrigin(0.5).setDepth(63);_els.push(_wxWarn);}
     const sub=this.add.text(W/2,H/2+(this._weatherEscalated?110:98),'2nd Half Kickoff',{fontSize:'11px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(63);
     _els.push(sub);
+    // INNO I52: half-time adjustment cards — pick 1 of 3 coaching tweaks
+    const _adjCards=[
+      {label:'QUICK STRIKES',desc:'+5% comp% on quick/medium routes',fn:()=>{this._htAdj='quick';}},
+      {label:'TIGHTEN UP',   desc:'+6% INT chance on opp passes',   fn:()=>{this._htAdj='def';}},
+      {label:'RUN FIRST',    desc:'+8 rush yards base this half',    fn:()=>{this._htAdj='run';}},
+    ];
+    const el_depth=63;
+    const panelH=220; const px=W/2; const py=H/2;
+    const _adjY=py+panelH/2-54;
+    const _adjTitle=this.add.text(px,_adjY-18,'COACHING ADJUSTMENT',{fontSize:'7px',fontFamily:'monospace',fontStyle:'bold',color:'#334155',letterSpacing:2}).setOrigin(0.5).setDepth(el_depth+2);
+    _els.push(_adjTitle);
+    _adjCards.forEach((ac,i)=>{
+      const _ax=px+(i-1)*126;
+      const _ab=this.add.rectangle(_ax,_adjY+12,112,36,0x1e293b).setDepth(el_depth+2).setStrokeStyle(1,0x475569,0.7).setInteractive({useHandCursor:true});
+      const _al=this.add.text(_ax,_adjY+5,ac.label,{fontSize:'7px',fontFamily:'monospace',fontStyle:'bold',color:'#e2e8f0'}).setOrigin(0.5).setDepth(el_depth+3);
+      const _ad=this.add.text(_ax,_adjY+18,ac.desc,{fontSize:'6px',fontFamily:'monospace',color:'#475569'}).setOrigin(0.5).setDepth(el_depth+3);
+      _ab.on('pointerover',()=>_ab.setFillStyle(0x334155,1));
+      _ab.on('pointerout',()=>_ab.setFillStyle(0x1e293b,1));
+      _ab.on('pointerdown',()=>{ac.fn();_al.setColor('#22c55e');_adjCards.forEach((_,j)=>{if(j!==i)_ab.setAlpha(0.4);});});
+      _els.push(_ab,_al,_ad);
+    });
     Sound.whistle();
     this.time.delayedCall(4000,()=>{
       this.tweens.add({targets:_els,alpha:0,duration:500,onComplete:()=>{
@@ -3009,6 +3132,22 @@ export class FieldScene extends Phaser.Scene {
 
     // AI POSSESSION — user defends
     if (this.phase === 'ai_run') {
+      // INNO I51: user controls safety during AI run
+      if(this._userDefActive&&this._userDefDot?.visible){
+        const _k=this.keys,_dp=this._dpadState,_dt=delta/1000,_us=this._defSpd*_dt*0.85;
+        if(_k.rt.isDown||_k.d.isDown||_dp.dx>0){this._userDefDot.x+=_us;}
+        if(_k.lt.isDown||_k.a.isDown||_dp.dx<0){this._userDefDot.x-=_us;}
+        if(_k.up.isDown||_k.w.isDown||_dp.dy<0){this._userDefDot.y-=_us;}
+        if(_k.dn.isDown||_k.s.isDown||_dp.dy>0){this._userDefDot.y+=_us;}
+        this._userDefDot.x=clamp(this._userDefDot.x,FIELD_LEFT,FIELD_RIGHT);
+        this._userDefDot.y=clamp(this._userDefDot.y,FIELD_Y,FIELD_Y+FIELD_H);
+        if(this._userDefLbl){this._userDefLbl.setPosition(this._userDefDot.x,this._userDefDot.y);}
+        if(this.aiRunner&&Math.hypot(this._userDefDot.x-this.aiRunner.x,this._userDefDot.y-this.aiRunner.y)<16){
+          this._userDefActive=false; this._show(this._userDefDot,false); this._userDefLbl?.destroy();
+          this._userTackle();
+          return;
+        }
+      }
       this._aiJukeCD-=delta;
       // AI runner: smooth angle changes for variety
       if (Math.random()<0.012) this._aiAngle=(Math.random()-0.5)*0.5;
@@ -3704,6 +3843,13 @@ export class FieldScene extends Phaser.Scene {
             fontSize:'13px', fontFamily:'monospace', color:'#eab308', fontStyle:'bold', stroke:'#000', strokeThickness:2
           }).setOrigin(0.5).setDepth(30);
           this.time.delayedCall(900, () => { try { flash.destroy(); } catch {} });
+          // INNO I53: formation shift visual when audible changes alignment
+          [this.wr1,this.wr2,this.te,this.rb].forEach((d,i)=>{
+            if(!d?.visible)return;
+            const _shifts=[{x:d.x+12,y:d.y-8},{x:d.x-12,y:d.y+8},{x:d.x,y:d.y-14},{x:d.x+8,y:d.y}];
+            const _shift=_shifts[i]||{x:d.x,y:d.y};
+            this.tweens.add({targets:d,x:_shift.x,y:_shift.y,duration:220,ease:'Sine.easeOut',yoyo:true,onUpdate:()=>this._syncLbl(d)});
+          });
         }
       });
       this._audibleMenuElems.push(bg, txt);
@@ -4428,6 +4574,9 @@ export class FieldScene extends Phaser.Scene {
   // ─── P77: Penalty Accept/Decline ───
   _showPenaltyChoice(penaltyName,yards,beneficiary) {
     const W=this.scale.width,H=this.scale.height;
+    // INNO I54: penalty flag arc animation
+    {const _fg=this.add.rectangle((this.qb?.x||W/2)+20,(this.qb?.y||FIELD_Y+FIELD_H/2)-10,8,8,0xfbbf24).setDepth(20);
+    this.tweens.add({targets:_fg,x:W/2,y:FIELD_Y+FIELD_H/2,duration:420,ease:'Quad.easeOut',onComplete:()=>{this.tweens.add({targets:_fg,alpha:0,duration:300,onComplete:()=>_fg?.destroy()});}});}
     const bg=this.add.rectangle(W/2,H/2-20,W*0.9,80,0x1e293b,0.96).setDepth(50).setStrokeStyle(2,0xfde047);
     const hd=this.add.text(W/2,H/2-54,'🚩 FLAG ON THE PLAY',{fontSize:'11px',fontFamily:'monospace',fontStyle:'bold',color:'#fde047'}).setOrigin(0.5).setDepth(51);
     const nm=this.add.text(W/2,H/2-38,`${penaltyName} — ${yards} yds`,{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#fff'}).setOrigin(0.5).setDepth(51);
