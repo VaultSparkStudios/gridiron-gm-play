@@ -1,3 +1,12 @@
+<!-- rolling-status-start -->
+## Rolling Status (auto-updated each closeout)
+Sparkline (last 5 totals): —
+3-session avg: Dev — | Align — | Momentum — | Engage — | Process —
+Avg total: —/50  |  Velocity trend: —  |  Debt: →
+Last session: — | Session 0 | Total: —/50 | Velocity: —
+─────────────────────────────────────────────────────────────────────
+<!-- rolling-status-end -->
+
 # Self-Improvement Loop
 
 This file is the living audit and improvement engine for the project.
@@ -70,3 +79,19 @@ Rate 0–10 per category at each closeout:
 
 - [SIL] Fill out all context files with project-specific content
 - [SIL] Define first concrete milestone for Momentum tracking
+
+## 2026-03-27 — Companion Bootstrap | Total: null/50 | Velocity: 0 | Debt: →
+Rolling avg (last 3): [N=0] Dev — | Align — | Momentum — | Engage — | Process —
+
+| Category | Score | vs Last | Notes |
+|---|---|---|---|
+| Dev Health | null | — | Companion bootstrap — follows parent Gridiron-GM |
+| Creative Alignment | null | — | Companion bootstrap |
+| Momentum | null | — | Companion bootstrap |
+| Engagement | null | — | Companion bootstrap |
+| Process Quality | null | — | Companion profile established |
+| **Total** | **null/50** | — | |
+
+**Top win:** Companion profile established under VaultSpark Studio OS governance
+**Top gap:** No SIL data — companion follows parent cadence
+**Intent outcome:** Achieved — companion bootstrap complete
