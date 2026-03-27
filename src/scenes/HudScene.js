@@ -45,9 +45,13 @@ export class HudScene extends Phaser.Scene {
     // Opponent score (right, large)
     this.scoreTxtO=this.add.text(W-12,HH/2+6,String(state.score.opp),{fontSize:'20px',fontFamily:'monospace',fontStyle:'bold',color:'#f1f5f9'}).setOrigin(1,0.5).setDepth(21);
 
-    // ── CENTER: QUARTER + DOWN & DISTANCE ─────────────────────────────────
-    this.qtrTxt=this.add.text(W/2,6,`Q${state.quarter}`,{
+    // ── CENTER: QUARTER + GAME CLOCK + DOWN & DISTANCE ────────────────────
+    this.qtrTxt=this.add.text(W/2-30,6,`Q${state.quarter}`,{
       fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#3b82f6',letterSpacing:3
+    }).setOrigin(0.5,0).setDepth(21);
+    // v36: Game clock display (MM:SS)
+    this.clockTxt=this.add.text(W/2+30,6,this._fmtClock(state.clock||900),{
+      fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#f1f5f9'
     }).setOrigin(0.5,0).setDepth(21);
 
     this.downTxt=this.add.text(W/2,19,this._downStr(),{
@@ -107,7 +111,12 @@ export class HudScene extends Phaser.Scene {
     this.events.on('resetHud',           this._refresh,            this);
     this.events.on('playResult',         this._onPlayResult,       this);
     this.events.on('possessionChange',   this._onPossessionChange, this);
+    this.events.on('clockUpdate',        this._onClockUpdate,      this);
   }
+
+  // v36: Game clock helpers
+  _fmtClock(secs) { const s=Math.max(0,Math.round(secs||0)); return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}` }
+  _onClockUpdate(secs, qtr) { this.clockTxt?.setText(this._fmtClock(secs)); this.qtrTxt?.setText(`Q${qtr}`); if(secs<=30&&qtr>=4){this.clockTxt?.setColor('#ef4444');}else{this.clockTxt?.setColor('#f1f5f9');} }
 
   _scoreStr() {
     const t=state.team?.ab||'YOU',o=state.opponent?.ab||'OPP';
@@ -132,6 +141,7 @@ export class HudScene extends Phaser.Scene {
     this.scoreTxtO.setText(String(state.score.opp));
     this.downTxt.setText(this._downStr());
     this.qtrTxt.setText(`Q${state.quarter}`);
+    this.clockTxt?.setText(this._fmtClock(state.clock||0));
     const col=result.td?C.gd:result.turnover?C.rd:result.yards>0?C.gn:C.rd;
     this.resultTxt.setText(result.text).setColor(col).setAlpha(1);
     this.tweens.add({targets:this.resultTxt,alpha:0,duration:1400,delay:600});
@@ -185,6 +195,7 @@ export class HudScene extends Phaser.Scene {
     this.scoreTxtO.setText(String(state.score.opp));
     this.downTxt.setText(this._downStr());
     this.qtrTxt.setText(`Q${state.quarter}`);
+    this.clockTxt?.setText(this._fmtClock(state.clock||900));
     this.phaseTxt.setText('⏸ PRE-SNAP').setColor(C.mt);
     this._updateYdBar();
   }

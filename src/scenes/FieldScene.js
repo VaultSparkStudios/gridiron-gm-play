@@ -1708,6 +1708,37 @@ export class FieldScene extends Phaser.Scene {
     state.playerStats[id][key] = (state.playerStats[id][key]||0) + val;
   }
 
+  // v36: Game clock — deduct seconds per play; advance quarter when clock hits 0
+  _tickClock(seconds) {
+    state.clock = Math.max(0, (state.clock || 900) - seconds);
+    // Two-minute warning
+    const W = this.scale.width;
+    if (state.quarter===2 && !this._twoMinFired1 && state.clock <= 120) {
+      this._twoMinFired1 = true;
+      const _twm = this.add.text(W/2, FIELD_Y+FIELD_H/2-30, '⏱ TWO-MINUTE WARNING — Q2', {fontSize:'13px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(55);
+      this.tweens.add({targets:_twm,alpha:0,duration:1200,delay:1600,onComplete:()=>_twm?.destroy?.()});
+    }
+    if (state.quarter===4 && !this._twoMinFired2 && state.clock <= 120) {
+      this._twoMinFired2 = true;
+      const _twm2 = this.add.text(W/2, FIELD_Y+FIELD_H/2-30, '⏱ TWO-MINUTE WARNING — Q4', {fontSize:'13px',fontFamily:'monospace',fontStyle:'bold',color:'#ef4444',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(55);
+      this.tweens.add({targets:_twm2,alpha:0,duration:1200,delay:1600,onComplete:()=>_twm2?.destroy?.()});
+    }
+    // Quarter transition when clock expires
+    if (state.clock <= 0 && state.quarter < 4) {
+      state.quarter++;
+      state.clock = 900;
+      this._recoverFatigue();
+      // Quarter change banner
+      const _qb = this.add.text(W/2, FIELD_Y+FIELD_H/2, `Q${state.quarter} BEGINS`, {fontSize:'22px',fontFamily:'monospace',fontStyle:'bold',color:'#3b82f6',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(55);
+      this.tweens.add({targets:_qb,alpha:0,scaleX:1.2,scaleY:1.2,duration:1000,delay:800,onComplete:()=>_qb?.destroy?.()});
+    } else if (state.clock <= 0 && state.quarter >= 4) {
+      state.clock = 0; // freeze at 0 for display
+    }
+    // Emit clock to HUD
+    const hud = this.scene.get('Hud');
+    hud?.events?.emit('clockUpdate', state.clock, state.quarter);
+  }
+
   _endPlay(result) {
     // P102: store replay trail on significant plays
     this._storeReplayTrail(result.yards||0, result.text||'');
@@ -1769,7 +1800,8 @@ export class FieldScene extends Phaser.Scene {
       }
     }
     state.plays++;
-    if (state.plays%8===0) { state.quarter=Math.min(4,state.quarter+1); this._recoverFatigue(); }
+    // v36: Clock-based quarter advancement — replaces play-count quarters
+    {const _isInc=result.type==='inc';const _isRun=result.type==='run'||result.type==='sack';const _secs=_isInc?Math.round(5+Math.random()*12):_isRun?Math.round(25+Math.random()*18):Math.round(32+Math.random()*18);this._tickClock(_secs);}
     // P100: 100-play milestone flash
     if(state.plays===100){const W=this.scale.width;const m=this.add.text(W/2,FIELD_Y+FIELD_H/2,'🎖️ 100 PLAYS PLAYED!',{fontSize:'18px',fontFamily:'monospace',fontStyle:'bold',color:'#fbbf24',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(60);this.tweens.add({targets:m,alpha:0,y:m.y-40,delay:800,duration:1200,onComplete:()=>m?.destroy?.()});}
     // P41: momentum drain on turnover
@@ -1812,7 +1844,7 @@ export class FieldScene extends Phaser.Scene {
       }
     }
     if (!state._halfShown && state.quarter>=3 && !this._pendingPAT) { state._halfShown=true; this.time.delayedCall(1600,()=>this._showHalftime()); return; }
-    if (state.quarter>4 || state.plays>=40) {
+    if (state.quarter>4 || state.plays>=120) {
       // P60: overtime on tie
       if (!this._isOT && state.score.team===state.score.opp) { this.time.delayedCall(1600,()=>this._showOTCoinFlip()); }
       else {
@@ -2373,7 +2405,7 @@ export class FieldScene extends Phaser.Scene {
     const hud = this.scene.get('Hud');
     hud?.events?.emit('playResult', result); hud?.events?.emit('possessionChange','team');
     if (!state._halfShown && state.quarter>=3) { state._halfShown=true; this.time.delayedCall(1600,()=>this._showHalftime()); return; }
-    if (state.quarter>4 || state.plays>=40) {
+    if (state.quarter>4 || state.plays>=120) {
       this.time.delayedCall(2000, ()=>this.scene.start('GameOver'));
     } else {
       // P70: Hurry-Up Defense — Q4, score within 8
@@ -2496,7 +2528,7 @@ export class FieldScene extends Phaser.Scene {
       }
     }
     if (!state._halfShown && state.quarter>=3) { state._halfShown=true; this.time.delayedCall(1600,()=>this._showHalftime()); return; }
-    if (state.quarter>4 || state.plays>=40) {
+    if (state.quarter>4 || state.plays>=120) {
       this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
     } else if (state.possession==='opp') {
       this.time.delayedCall(_i31Urgent?700:1800, ()=>this._startAIDrive());

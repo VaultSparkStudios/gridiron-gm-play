@@ -8,6 +8,9 @@ export const state = {
   score: { team: 0, opp: 0 },
   quarter: 1,
   plays: 0,
+  // v36: 60-min game clock — 900s per quarter (15 min × 60s)
+  clock: 900,
+  clockRunning: false,
 
   // Down & distance
   down: 1,
@@ -68,6 +71,8 @@ export function resetState() {
   state.score = { team: 0, opp: 0 };
   state.quarter = 1;
   state.plays = 0;
+  state.clock = 900;
+  state.clockRunning = false;
   state.down = 1;
   state.toGo = 10;
   state.yardLine = 25;
@@ -111,6 +116,7 @@ export function exportStats() {
     ...state.stats,
     score: state.score,
     quarters: state.quarter,
+    finalClock: state.clock,
     teamName: state.team?.name,
     oppName: state.opponent?.name,
     // Per-player deltas — GM reads these to update player season stats
