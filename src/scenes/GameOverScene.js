@@ -194,15 +194,65 @@ export class GameOverScene extends Phaser.Scene {
       });
     }
 
+    // I-7: Highlight Card button
+    const hlCard = this.add.rectangle(W/2, 458, 160, 28, 0x1e293b).setInteractive({ useHandCursor:true }).setStrokeStyle(1,0xf59e0b,0.8);
+    this.add.text(W/2, 458, '📷 HIGHLIGHT CARD', { fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#f59e0b' }).setOrigin(0.5);
+    hlCard.on('pointerover', ()=>hlCard.setFillStyle(0x2d1f00));
+    hlCard.on('pointerout',  ()=>hlCard.setFillStyle(0x1e293b));
+    hlCard.on('pointerdown', ()=>this._downloadHighlightCard());
+
     // Buttons
-    const playAgain = this.add.rectangle(W/2-90, 430, 160, 40, 0x22c55e).setInteractive({ useHandCursor:true });
-    this.add.text(W/2-90, 430, 'PLAY AGAIN', { fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#fff' }).setOrigin(0.5);
+    const playAgain = this.add.rectangle(W/2-90, 490, 160, 36, 0x22c55e).setInteractive({ useHandCursor:true });
+    this.add.text(W/2-90, 490, 'PLAY AGAIN', { fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#fff' }).setOrigin(0.5);
     playAgain.on('pointerdown', ()=>this.scene.start('Boot'));
     playAgain.on('pointerover', ()=>playAgain.setFillStyle(0x16a34a));
     playAgain.on('pointerout',  ()=>playAgain.setFillStyle(0x22c55e));
 
-    const menu = this.add.rectangle(W/2+90, 430, 160, 40, 0x1e293b).setInteractive({ useHandCursor:true }).setStrokeStyle(1,0x334155);
-    this.add.text(W/2+90, 430, 'MAIN MENU', { fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#94a3b8' }).setOrigin(0.5);
+    const menu = this.add.rectangle(W/2+90, 490, 160, 36, 0x1e293b).setInteractive({ useHandCursor:true }).setStrokeStyle(1,0x334155);
+    this.add.text(W/2+90, 490, 'MAIN MENU', { fontSize:'12px', fontFamily:'monospace', fontStyle:'bold', color:'#94a3b8' }).setOrigin(0.5);
     menu.on('pointerdown', ()=>this.scene.start('Boot'));
+  }
+
+  // I-7: Download highlight stat card as PNG
+  _downloadHighlightCard(){
+    const gs={
+      teamScore: state.score?.team||0,
+      oppScore:  state.score?.opp||0,
+      teamAb:    state.team?.ab||'TEAM',
+      oppAb:     state.opponent?.ab||'OPP',
+      week:      state.week||1,
+    };
+    // MVP from playerDeltas (exportStats already imported at top)
+    const pdelta=(()=>{try{const s=exportStats?.();return s?.playerDeltas||[];}catch{return [];}})();
+    const _mvp=pdelta.length?[...pdelta].sort((a,b)=>((b.passYds||0)+(b.rushYds||0)+(b.recYds||0))-((a.passYds||0)+(a.rushYds||0)+(a.recYds||0)))[0]:null;
+    gs.mvp=_mvp?{name:_mvp.name,pos:_mvp.pos,yds:(_mvp.passYds||0)+(_mvp.rushYds||0)+(_mvp.recYds||0),td:_mvp.td||0}:null;
+    const c=document.createElement('canvas');
+    c.width=400;c.height=225;
+    const ctx=c.getContext('2d');
+    // Background
+    const grad=ctx.createLinearGradient(0,0,400,225);
+    grad.addColorStop(0,'#0a0f1a');grad.addColorStop(1,'#1e293b');
+    ctx.fillStyle=grad;ctx.fillRect(0,0,400,225);
+    // Amber border
+    ctx.fillStyle='#f59e0b';ctx.fillRect(0,0,400,4);
+    // Score
+    ctx.fillStyle='#f1f5f9';ctx.textAlign='center';
+    ctx.font='bold 48px monospace';
+    ctx.fillText(`${gs.teamScore} - ${gs.oppScore}`,200,100);
+    // Teams
+    ctx.font='16px monospace';ctx.fillStyle='#94a3b8';
+    ctx.fillText(`${gs.teamAb} vs ${gs.oppAb}`,200,130);
+    // MVP
+    if(gs.mvp){
+      ctx.font='bold 12px monospace';ctx.fillStyle='#f59e0b';
+      ctx.fillText(`MVP: ${gs.mvp.name||''} — ${gs.mvp.yds}yds${gs.mvp.td?` ${gs.mvp.td}TD`:''}`,200,160);
+    }
+    // Watermark
+    ctx.font='9px monospace';ctx.fillStyle='#334155';ctx.textAlign='right';
+    ctx.fillText('Gridiron GM',390,215);
+    // Download
+    const a=document.createElement('a');
+    a.download=`highlight-wk${gs.week}.png`;
+    a.href=c.toDataURL('image/png');a.click();
   }
 }

@@ -126,7 +126,7 @@ export class BootScene extends Phaser.Scene {
     _settBtn.on('pointerover',()=>_settBtn.setColor('#94a3b8'));
     _settBtn.on('pointerout',()=>_settBtn.setColor('#334155'));
     _settBtn.on('pointerdown',()=>{
-      const _sv=this.add.rectangle(W/2,H/2,220,120,0x0d1424).setDepth(50).setStrokeStyle(1,0x334155).setInteractive();
+      const _sv=this.add.rectangle(W/2,H/2,220,148,0x0d1424).setDepth(50).setStrokeStyle(1,0x334155).setInteractive();
       const _svTx=this.add.text(W/2,H/2-40,'⚙ SETTINGS',{fontSize:'10px',fontFamily:'monospace',fontStyle:'bold',color:'#f1f5f9'}).setOrigin(0.5).setDepth(51);
       const _curVol=parseFloat(localStorage.getItem('gm_vol')||'0.3');
       const _svVLbl=this.add.text(W/2-70,H/2-16,'SFX VOL:',{fontSize:'8px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0,0.5).setDepth(51);
@@ -136,9 +136,20 @@ export class BootScene extends Phaser.Scene {
       let _vol=_curVol;
       _svDn.on('pointerdown',()=>{_vol=Math.max(0,_vol-0.1);localStorage.setItem('gm_vol',_vol.toFixed(1));_svVVal.setText(Math.round(_vol*100)+'%');});
       _svUp.on('pointerdown',()=>{_vol=Math.min(1,_vol+0.1);localStorage.setItem('gm_vol',_vol.toFixed(1));_svVVal.setText(Math.round(_vol*100)+'%');});
+      // I-30: commentary toggle
+      const _commEnabled=localStorage.getItem('gm_commentary_enabled')!=='off';
+      const _commLbl=this.add.text(W/2-70,H/2+8,'COMMENTARY:',{fontSize:'8px',fontFamily:'monospace',color:'#64748b'}).setOrigin(0,0.5).setDepth(51);
+      const _commVal=this.add.text(W/2+30,H/2+8,_commEnabled?'ON':'OFF',{fontSize:'8px',fontFamily:'monospace',color:_commEnabled?'#22c55e':'#ef4444'}).setOrigin(0,0.5).setDepth(51).setInteractive({useHandCursor:true});
+      _commVal.on('pointerdown',()=>{const on=localStorage.getItem('gm_commentary_enabled')!=='off';if(on){localStorage.setItem('gm_commentary_enabled','off');_commVal.setText('OFF').setColor('#ef4444');}else{localStorage.removeItem('gm_commentary_enabled');_commVal.setText('ON').setColor('#22c55e');}});
       const _svClose=this.add.text(W/2,H/2+36,'CLOSE',{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#22c55e',backgroundColor:'#0d1424',padding:{x:10,y:4}}).setOrigin(0.5).setDepth(51).setInteractive({useHandCursor:true});
-      _svClose.on('pointerdown',()=>{[_sv,_svTx,_svVLbl,_svVVal,_svDn,_svUp,_svClose].forEach(e=>e?.destroy());});
+      _svClose.on('pointerdown',()=>{[_sv,_svTx,_svVLbl,_svVVal,_svDn,_svUp,_commLbl,_commVal,_svClose].forEach(e=>e?.destroy());});
     });
+
+    // I-4: extract gamePlan from bridge export
+    try{
+      const _gpRaw=localStorage.getItem('gm_roster_export');
+      if(_gpRaw){const _gpData=JSON.parse(_gpRaw);if(_gpData.gamePlan){window._gmGamePlan=_gpData.gamePlan;}}
+    }catch{}
 
     // INNO I79: bridge validation indicator
     const _bridgeRaw=localStorage.getItem('gm_roster_export');

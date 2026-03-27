@@ -1,5 +1,6 @@
 import { state } from '../data/gameState.js';
 import { Sound } from '../utils/sound.js';
+import { track } from '../utils/analytics.js';
 
 const FIELD_Y = 60;
 const FIELD_H = 380;
@@ -110,6 +111,8 @@ export class FieldScene extends Phaser.Scene {
     this._aiCallLog = [];
     // INNO I64: defensive pressure ring blitz bonus
     this._blitzPressureBonus = 0;
+    // I-4: game plan defense bonus flags (set each AI drive start)
+    this._gpDefSackBonus = 0; this._gpDefCovBonus = 0;
     // v27: I27/I33/I34/I35/I37/I38/P120-P125 flags
     this._fieldPosPenalty = false; this._freshDlUsed = false; this._freshDlH1 = 0; this._freshDlH2 = 0;
     this._doubleMoveActive = false; this._doubleMoveBtn = null; this._doubleMoveMod = 0;
@@ -807,6 +810,7 @@ export class FieldScene extends Phaser.Scene {
       state.yardLine = 20; // flip in _endPlay will give opponent their 80 (80 yds to score)
       this._pendingKickoffCover = true;
       this._tdFlash(`FG GOOD! ${dist} yds +3`, '#22c55e');
+      this._speak("It's good! Field goal!");
     } else {
       this._tdFlash(`FG NO GOOD — ${dist} yds`, '#ef4444');
     }
@@ -1336,6 +1340,7 @@ export class FieldScene extends Phaser.Scene {
     // B-bridge: credit sack to user's top DL/LB
     const _sackDef = (state.team?.players||[]).find(p=>['DL','LB'].includes(p.pos)&&p.id);
     if (_sackDef) this._track(_sackDef.id, 'sack', 1);
+    this._speak('He gets the sack!');
     this._endPlay({ yards:-loss, text:`SACK! -${loss} yards`, type:'sack', turnover:false, td:false });
   }
 
@@ -1638,6 +1643,8 @@ export class FieldScene extends Phaser.Scene {
     const td = state.yardLine + (yards||0) >= 100;
     if (td) {
       Sound.td(); state.stats.team.td++;
+      this._speak('Touchdown!');
+      track('user_td', { yardLine: state.yardLine, quarter: state.quarter });
       // Endorsement activation toast
       const _scorer=this._lastReceiver||(call==='scramble'?qb:rb);
       if(_scorer?.endorsed){this._broadcastBanner(`💰 ${_scorer.name?.split(' ').pop()} ENDORSEMENT PAYS OFF!`,'#f59e0b');}
@@ -1808,7 +1815,10 @@ export class FieldScene extends Phaser.Scene {
     if (state.quarter>4 || state.plays>=40) {
       // P60: overtime on tie
       if (!this._isOT && state.score.team===state.score.opp) { this.time.delayedCall(1600,()=>this._showOTCoinFlip()); }
-      else { this.time.delayedCall(1600, ()=>this.scene.start('GameOver')); }
+      else {
+        if(state.score.team>state.score.opp){this._speak(`Final score: ${state.score.team} to ${state.score.opp}. Great game!`);}
+        this.time.delayedCall(1600, ()=>this.scene.start('GameOver'));
+      }
     } else if (state.possession==='opp') {
       this.time.delayedCall(1800, ()=>{
         if (this._pendingKickoffCover) { this._pendingKickoffCover=false; this._startKickoffCover(); }
@@ -2069,6 +2079,11 @@ export class FieldScene extends Phaser.Scene {
     let passCh = this._aiHurryUp ? 0.65 : ({cover2:0.35, man:0.45, blitz:0.55, prevent:0.20}[call] || 0.35);
     if(_aiPersonality==='conservative') passCh=Math.max(0.12, passCh-0.15); // run heavy to bleed clock
     if(_aiPersonality==='desperate') passCh=Math.min(0.80, passCh+0.20); // pass heavy to catch up
+    // I-4: game plan bridge modifiers (user's offensive game plan shifts AI's defense read; def plan shifts sack/coverage)
+    if(window._gmGamePlan?.off==='pass-heavy') passCh=Math.min(0.92, passCh+0.12);
+    if(window._gmGamePlan?.off==='run-heavy')  passCh=Math.max(0.08, passCh-0.12);
+    this._gpDefSackBonus    = window._gmGamePlan?.def==='aggressive'  ? 0.08 : 0;
+    this._gpDefCovBonus     = window._gmGamePlan?.def==='conservative'? 0.08 : 0;
     if (this._aiHurryUp) { this._aiRunSpeed *= 1.08; }
     // INNO I21: down & distance matrix — tune AI pass tendency per situation
     if(this.aiDown===2&&this.aiToGo<=3) passCh=Math.min(passCh,0.30);
@@ -2175,7 +2190,9 @@ export class FieldScene extends Phaser.Scene {
     this._rushLaneBonus=null;
     // INNO I64: apply pressure ring blitz bonus to sack check
     const _prSackBonus=this._blitzPressureBonus||0; this._blitzPressureBonus=0;
-    if (dist < 22 || (dist < 40 && (_rlSackBonus>0||_prSackBonus>0) && Math.random()<(_rlSackBonus+_prSackBonus))) {
+    // I-4: game plan aggressive defense sack bonus
+    const _gpSackBonus=this._gpDefSackBonus||0;
+    if (dist < 22 || (dist < 40 && (_rlSackBonus>0||_prSackBonus>0||_gpSackBonus>0) && Math.random()<(_rlSackBonus+_prSackBonus+_gpSackBonus))) {
       this.phase = 'result';
       Sound.tackle?.() || Sound.whistle?.();
       this._tdFlash('SACK! QB DOWN 🏈','#22c55e');
@@ -2212,12 +2229,15 @@ export class FieldScene extends Phaser.Scene {
     this.phase='result'; this._clearArc();
     const call=this._defCall||'cover2';
     const defDist=Math.hypot(this.rb.x-rec.dot.x, this.rb.y-rec.dot.y);
-    const intThresh=(call==='man'?56:call==='cover2'?44:32)-(this._passRushCoverBreak?20:0)+(this._coverageAssignMod||0)+(this._jumpRouteActive?22:0);
+    // I-4: conservative game plan improves coverage (increases INT threshold distance)
+    const _gpCovAdj=Math.round((this._gpDefCovBonus||0)*80);
+    const intThresh=(call==='man'?56:call==='cover2'?44:32)-(this._passRushCoverBreak?20:0)+(this._coverageAssignMod||0)+(this._jumpRouteActive?22:0)+_gpCovAdj;
     this._passRushCoverBreak=false; this._coverageAssignMod=0; this._jumpRouteActive=false;
     if(defDist<intThresh){
       Sound.int();
       state.stats.team.int=(state.stats.team.int||0)+1;
       this._tdFlash('INTERCEPTED! 🏈','#22c55e');
+      this._speak('Interception! Great defense!');
       const _intCB=(state.team?.players||[]).find(p=>['CB','S'].includes(p.pos)&&p.id); if(_intCB)this._track(_intCB.id,'defInt',1);
       // P36: Pick-six return mini-game
       this._launchPickSixReturn(rec.dot);
@@ -4927,6 +4947,9 @@ export class FieldScene extends Phaser.Scene {
   // INNO I24: timer registry helpers — store all loop timers for clean shutdown
   _regTimer(t){ this._timerRegistry.push(t); return t; }
   shutdown(){ this._timerRegistry?.forEach(t=>{try{t.remove();}catch{}}); this._timerRegistry=[]; }
+
+  // I-30: Web Speech API commentary helper
+  _speak(text){try{if(localStorage.getItem('gm_commentary_enabled')==='off')return;if(!window.speechSynthesis||!window.speechSynthesis.speak)return;const u=new SpeechSynthesisUtterance(text);u.rate=1.1;u.pitch=0.9;u.volume=0.7;const v=window.speechSynthesis.getVoices();const pref=v.find(x=>x.name.includes('Google'))||v[0];if(pref)u.voice=pref;window.speechSynthesis.speak(u);}catch(e){}}
 
 }
 
