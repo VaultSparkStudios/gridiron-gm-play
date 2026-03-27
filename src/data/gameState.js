@@ -21,6 +21,8 @@ export const state = {
   // Current play
   currentCall: null,   // play call id
   lastResult: null,    // result object from play resolution
+  // v37: Offensive formation selected pre-snap
+  offFormation: 'shotgun',  // 'shotgun'|'i_form'|'pistol'|'spread'
 
   // Per-drive stats (accumulated for export)
   stats: {

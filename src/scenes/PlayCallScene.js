@@ -26,9 +26,69 @@ const CALLS = [
 export class PlayCallScene extends Phaser.Scene {
   constructor() { super('PlayCall'); }
 
+  // v37: Offensive formation data
+  static get FORMATIONS() {
+    return {
+      shotgun: { label:'SHOTGUN', tip:'Pass boost · +8% comp · Deep routes', passBonus:0.08, runPenalty:-0.06, icon:'🎯' },
+      i_form:  { label:'I-FORM',  tip:'Run power · +6% yards · Fumble shield', passBonus:-0.05, runBonus:0.06, icon:'💪' },
+      pistol:  { label:'PISTOL',  tip:'Balanced · No modifiers · Reads D',  passBonus:0, runBonus:0, icon:'⚖️' },
+      spread:  { label:'SPREAD',  tip:'WR space · +12% separation · Motion', passBonus:0.05, spreadBonus:true, icon:'↔️' },
+    };
+  }
+
   create() {
     if (state.down === 4) { this._show4thDown(); return; }
-    this._showCallGrid();
+    if (state.possession !== 'team') { this._showCallGrid(); return; }
+    this._showFormationSelect();
+  }
+
+  _showFormationSelect() {
+    const W = this.scale.width, H = this.scale.height;
+    const forms = PlayCallScene.FORMATIONS;
+    const keys  = Object.keys(forms);
+    const panelW = 370, panelH = 160;
+    const px = W/2, py = H - panelH/2 - 8;
+
+    const bg   = this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.75).setDepth(30);
+    const panel= this.add.rectangle(px, py, panelW, panelH, 0x0d1424, 1).setDepth(31).setStrokeStyle(1, 0x334155);
+
+    this.add.text(px, py - panelH/2 + 10, 'SET FORMATION', {
+      fontSize:'9px', fontFamily:'monospace', fontStyle:'bold', color:'#94a3b8', letterSpacing:3
+    }).setOrigin(0.5, 0).setDepth(32);
+
+    const btnW = 82, btnH = 90, startX = px - ((keys.length-1) * (btnW+6))/2;
+    keys.forEach((key, i) => {
+      const f = forms[key];
+      const cx = startX + i * (btnW + 6);
+      const cy = py - panelH/2 + 76;
+      const isActive = (state.offFormation || 'shotgun') === key;
+      const accentHex = isActive ? '#38bdf8' : '#334155';
+      const accent    = Phaser.Display.Color.HexStringToColor(accentHex).color;
+
+      const box = this.add.rectangle(cx, cy, btnW, btnH, isActive ? 0x0c2233 : 0x111827, 1)
+        .setDepth(31).setStrokeStyle(isActive ? 2 : 1, accent, isActive ? 0.9 : 0.5).setInteractive({ useHandCursor: true });
+
+      this.add.text(cx, cy - 28, f.icon,    { fontSize:'18px', fontFamily:'monospace' }).setOrigin(0.5).setDepth(32);
+      this.add.text(cx, cy - 4,  f.label,   { fontSize:'8px', fontFamily:'monospace', fontStyle:'bold', color: isActive ? '#38bdf8' : '#e2e8f0' }).setOrigin(0.5).setDepth(32);
+      this.add.text(cx, cy + 14, f.tip,     { fontSize:'6px', fontFamily:'monospace', color:'#475569', wordWrap:{width:btnW-6}, align:'center' }).setOrigin(0.5, 0).setDepth(32);
+      if (isActive) this.add.text(cx, cy - btnH/2 + 5, '✓', { fontSize:'7px', fontFamily:'monospace', color:'#38bdf8' }).setOrigin(0.5).setDepth(33);
+
+      box.on('pointerover',  () => { if (!isActive) box.setFillStyle(0x1a2a3a, 1); });
+      box.on('pointerout',   () => { if (!isActive) box.setFillStyle(0x111827, 1); });
+      box.on('pointerdown',  () => {
+        state.offFormation = key;
+        this.children.removeAll(true);
+        this._showCallGrid();
+      });
+    });
+
+    // Auto-proceed after 3s if no input (keep existing formation)
+    this._fmTimer = this.time.delayedCall(3000, () => {
+      if (this.scene.isActive('PlayCall')) {
+        this.children.removeAll(true);
+        this._showCallGrid();
+      }
+    });
   }
 
   _showCallGrid() {

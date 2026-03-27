@@ -829,6 +829,10 @@ export class FieldScene extends Phaser.Scene {
     this._runnerData = pData;
     // Tuned: runner 72-90 px/s, QB scramble slightly slower
     this.runSpd = pxs(pData.spd, isScramble ? 58 : 72, 0.95) + (isOutside ? 8 : 0) + (isDraw ? 6 : 0);
+    // v37: Offensive formation run modifier
+    const _fmRun = state.offFormation==='i_form'?1.06:state.offFormation==='shotgun'?0.94:state.offFormation==='spread'?0.96:1.0;
+    this.runSpd *= _fmRun;
+    if(state.possession==='team'&&state.offFormation){const _fmLbl={'shotgun':'🎯 SHOTGUN','i_form':'💪 I-FORM','pistol':'⚖️ PISTOL','spread':'↔️ SPREAD'}[state.offFormation];if(_fmLbl){const _fl=this.add.text(this.scale.width/2,this.scale.height*0.28,_fmLbl,{fontSize:'9px',fontFamily:'monospace',fontStyle:'bold',color:'#94a3b8',alpha:0.8}).setOrigin(0.5).setDepth(19);this.tweens.add({targets:_fl,alpha:0,y:_fl.y-14,duration:900,onComplete:()=>_fl.destroy()});}}
     this.ball.x = this.runner.x; this.ball.y = this.runner.y;
     // V12: flash runner name at handoff
     this._flashCarrierName(this.runner, pData.name?.split(' ').pop()||(isScramble?'QB':'RB'));
@@ -1053,6 +1057,8 @@ export class FieldScene extends Phaser.Scene {
     this.phase = 'pass_wait';
     this.passVariant = callId.replace('pass_', '');
     const isAction = this.passVariant === 'action';
+    // v37: formation pass bonus stored for use in catchCh
+    this._formPassBonus = state.offFormation==='shotgun'?0.06:state.offFormation==='spread'?0.05:state.offFormation==='i_form'?-0.04:0;
     if (isAction) {
       this.tweens.add({ targets: this.rb, x: this.rb.x + 22, duration: 280, yoyo: true,
         onUpdate: () => this._syncLbl(this.rb) });
@@ -1552,7 +1558,8 @@ export class FieldScene extends Phaser.Scene {
         this._hurryUpActive = false;
         // INNO I12: QB hot/cold streak modifier
         const _streakMod = (this._qbStreak||0)>=3?0.08:(this._qbStreak||0)<=-2?-0.05:0;
-        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen+_confBonus+_cyBonus-_diffCovPen+_streakMod)*wxPassM, 0.22, 0.88);
+        // v37: formation pass bonus applied here (shotgun+0.06, spread+0.05, i_form-0.04)
+        let compCh = clamp((0.56+(qb.ovr-50)*0.004-(db.ovr-60)*0.002+momBonus+cbBonus+matchupBonus+qbInjPenalty-defForm.coverageBonus+_hurryPenalty+_tendPassPen+_confBonus+_cyBonus-_diffCovPen+_streakMod+(this._formPassBonus||0))*wxPassM, 0.22, 0.88);
         // INNO I15 [SIL]: trick play memory — defense anticipates flea flicker repeat
         if(this._trickMemCovPenalty&&this._fleaFlickerActive){compCh=Math.max(0.10,compCh-0.20);}
         // P71: motion pre-snap +10% comp on one route
