@@ -24,3 +24,6 @@ dist-ssr
 *.sln
 *.sw?
 .claude/
+docs/CREATIVE_DIRECTION_RECORD.md
+docs/RIGHTS_PROVENANCE.md
+

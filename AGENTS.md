@@ -23,3 +23,4 @@ Full decision: `vaultspark-studio-ops/docs/STUDIO_CANON.md` → CANON-008
 
 ---
 
+
