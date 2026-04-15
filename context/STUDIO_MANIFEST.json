@@ -1,0 +1,144 @@
+{
+  "schemaVersion": "1.0",
+  "generatedFrom": "ops runtime-pack synthesized manifest",
+  "synthesized": true,
+  "identity": {
+    "slug": "gridiron-gm-play",
+    "name": "Gridiron GM Play",
+    "repo": "VaultSparkStudios/gridiron-gm-play",
+    "owner": "VaultSpark Studios",
+    "type": "game",
+    "lifecycle": "deployed",
+    "audience": "public-unlaunched",
+    "vaultStatus": "VAULTED"
+  },
+  "studioOs": {
+    "applied": true,
+    "templateVersion": "3.2",
+    "complianceVersion": "1.5",
+    "sessionModeDefault": "builder",
+    "requiredFilesPresent": false
+  },
+  "listingMetadata": {
+    "canonicalSummary": "Browser-based playable deployment of Gridiron GM. Draft, trade, manage the cap, take the field. No install, no login.",
+    "tagline": "Maintaining playable deployment.",
+    "tags": [
+      "game",
+      "live",
+      "deployed"
+    ],
+    "categories": [
+      "game",
+      "public-unlaunched"
+    ],
+    "hubDescription": "Maintaining playable deployment.",
+    "websiteDescription": "Browser-based playable deployment of Gridiron GM. Draft, trade, manage the cap, take the field. No install, no login.",
+    "socialDescription": "Browser-based playable deployment of Gridiron GM. Draft, trade, manage the cap, take the field. No install, no login.",
+    "brandingLabel": "Powered by VaultSpark Studios"
+  },
+  "surfaces": {
+    "local": [
+      {
+        "label": "workspace",
+        "path": "C:\\Users\\p4cka\\documents\\development\\gridiron-gm-play"
+      }
+    ],
+    "staging": [],
+    "production": [],
+    "preview": [],
+    "admin": [],
+    "api": [],
+    "docs": [],
+    "github": [
+      {
+        "label": "repo",
+        "url": "https://github.com/VaultSparkStudios/gridiron-gm-play"
+      }
+    ],
+    "testing": []
+  },
+  "capabilities": {
+    "auth": false,
+    "payments": false,
+    "analytics": false,
+    "email": false,
+    "ai": false,
+    "publishing": false,
+    "community": false,
+    "storage": false,
+    "cron": false
+  },
+  "integrations": {
+    "studioHub": {
+      "enabled": true,
+      "mode": "private"
+    },
+    "website": {
+      "enabled": true,
+      "mode": "public-safe"
+    },
+    "socialDashboard": {
+      "enabled": true,
+      "mode": "private"
+    },
+    "sparkFunnel": {
+      "enabled": true,
+      "mode": "growth"
+    },
+    "ignis": {
+      "enabled": true,
+      "mode": "portfolio-intelligence"
+    },
+    "founderQueue": {
+      "enabled": true,
+      "mode": "private"
+    }
+  },
+  "secretsCapabilities": [],
+  "hosting": {
+    "hostingProvider": "none",
+    "liveUrl": null,
+    "stagingUrl": null,
+    "privatePreviewUrl": null,
+    "localDevUrl": null,
+    "deployStatus": "deployed-unannounced",
+    "testInstructions": []
+  },
+  "capacity": {
+    "currentPlanTier": "unknown",
+    "freePlanCeilings": [],
+    "fitsCurrentCapacity": true,
+    "preferredRuntime": "none",
+    "fallbackRuntime": "hetzner",
+    "notes": ""
+  },
+  "publicMetadata": {
+    "privateByDefault": true,
+    "publicReady": false,
+    "publicRepoSanitized": false,
+    "brandingRequired": true,
+    "brandingCompliant": true,
+    "footerAttribution": "A VaultSpark Studios Game",
+    "websiteListingRequired": true
+  },
+  "automation": {
+    "safeActions": [
+      "refresh-generated-surfaces"
+    ],
+    "guardedActions": [
+      "propagate-templates"
+    ],
+    "blockedActions": [
+      "change-canon",
+      "flip-repo-public",
+      "alter-licensing"
+    ]
+  },
+  "contracts": {
+    "hub": "context/contracts/hub.json",
+    "websitePublic": "context/contracts/website-public.json",
+    "socialDashboard": "context/contracts/social-dashboard.json",
+    "sparkFunnel": "context/contracts/sparkfunnel.json",
+    "ignis": "context/contracts/ignis.json"
+  }
+}
