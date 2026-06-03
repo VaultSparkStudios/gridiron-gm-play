@@ -27,3 +27,5 @@ dist-ssr
 docs/CREATIVE_DIRECTION_RECORD.md
 docs/RIGHTS_PROVENANCE.md
 
+.env.local
+context/.session-lock
