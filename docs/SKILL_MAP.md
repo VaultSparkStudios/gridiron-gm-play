@@ -14,7 +14,7 @@ Muscle memory: **`/start` → `/go` or `/goal` → `/closeout`**. Everything els
 | **`/start`** | Begin every session. Detects mode (BUILDER vs FOUNDER), loads context, renders the startup brief with SIGNALS + GENIUS HIT LIST + HUMAN PRESSURE. |
 | **`/go`** | Right after `/start`. Refreshes the Unified Genius List (IGNIS-fueled, 12 items), syncs items into TASK_BOARD, captures memory patterns, executes unblocked items at quality bar with risk gating. Proactively suggests a specialty skill if the project type warrants one. |
 | **`/goal`** | Durable Codex objective for one bounded long-running Studio task. Uses the top unblocked Now/Genius item unless you provide an exact goal, works in checkpoints, and stops only when verified, blocked, or approval-sensitive. |
-| **`/closeout`** | End every session. Write-back in canonical order → score 5 categories → commit + push via autopilot with confirmation. |
+| **`/closeout`** | End every session. Write-back in canonical order → score 10 categories (1000 total) → commit + push via the authorized autopilot workflow. |
 
 ## When you don't know the right command
 

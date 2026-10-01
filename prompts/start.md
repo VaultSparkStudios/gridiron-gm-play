@@ -16,6 +16,7 @@ Write session lock via Bash (avoids Write tool "file not read" guard on new file
 it for cross-agent parity (CANON-010); omitting it produces a contract-violating lock.
 ```bash
 echo "locked_by: agent-session
+session-id: <n>
 session_start: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 agent: <claude-code|codex|other>
 trigger: <founder-mission|recovery|scheduled-routine|ad-hoc>
