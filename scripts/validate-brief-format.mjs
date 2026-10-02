@@ -147,7 +147,12 @@ export function validateStartupBrief(body) {
   // PROJECT_STATUS vs rendered headline). false → the brief is showing stale or
   // unparseable state and /start must NOT proceed on it.
   const coherentMatch = body.match(/<!--\s*brief-coherent:\s*(true|false)\s*-->/i);
-  if (coherentMatch && coherentMatch[1].toLowerCase() === 'false') {
+  // S359 (VEILOS propagated contract brief-coherent-absent-fails-closed): an absent
+  // marker proves nothing, so it fails closed. Every canonical renderer (v3 and v5)
+  // emits the marker from lib/brief-coherence.mjs.
+  if (!coherentMatch) {
+    findings.staleBrief = 'brief-coherent marker ABSENT — freshness cannot be proven. Re-render before /start.';
+  } else if (coherentMatch[1].toLowerCase() === 'false') {
     findings.staleBrief = 'brief-coherent: false — renderer detected stale/unparseable SIL state (see ⛔ STALE BRIEF banner). Re-render before /start.';
   }
 

@@ -27,7 +27,8 @@ import { validateJsonSchema } from './lib/json-schema-lite.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
-const DNA_DIR = path.join(REPO_ROOT, 'agents', 'dna');
+// AGENT_DNA_DIR lets a test point at an empty or temporary directory.
+const DNA_DIR = process.env.AGENT_DNA_DIR ? path.resolve(process.env.AGENT_DNA_DIR) : path.join(REPO_ROOT, 'agents', 'dna');
 const SCHEMA_PATH = path.join(REPO_ROOT, 'docs', 'templates', 'project-system', 'agent-dna.schema.json');
 
 function loadJson(p) {
@@ -75,8 +76,9 @@ function main() {
   if (target) {
     files = [path.resolve(target)];
   } else if (!fs.existsSync(DNA_DIR)) {
-    console.log(`No DNA directory at ${path.relative(REPO_ROOT, DNA_DIR)} — nothing to validate.`);
-    process.exit(0);
+    // S359 (VEILOS propagated contract agent-dna-json-always-json): fall through
+    // with no files so --json still prints JSON instead of prose a caller cannot parse.
+    files = [];
   } else {
     files = fs.readdirSync(DNA_DIR)
       .filter(f => f.endsWith('.json'))
@@ -104,6 +106,7 @@ function main() {
   if (jsonOut) {
     console.log(JSON.stringify({ results, crossErrors: crossErrs, ok: failCount === 0 }, null, 2));
   } else {
+    if (files.length === 0) console.log(`No DNA directory at ${path.relative(REPO_ROOT, DNA_DIR)} — nothing to validate.`);
     for (const r of results) {
       if (r.ok) console.log(`✓ ${r.file}`);
       else {
