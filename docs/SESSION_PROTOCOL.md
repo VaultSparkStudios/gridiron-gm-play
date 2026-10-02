@@ -27,17 +27,29 @@ When revising a skill, verify all three before shipping. Drift in any of them (a
 
 ## Session lock format
 
-Every session starts by writing `context/.session-lock`:
+Every session starts by writing `context/.session-lock` **through the writer**, never by hand:
+
+```bash
+node scripts/write-session-lock.mjs --agent <claude-code|codex|other> --trigger <founder-mission|recovery|scheduled-routine|ad-hoc>
+```
+
+The writer emits the full contract (S358: this spec previously listed 5 of these 10 fields, and the template bot propagated the short form over projects whose tests require the full one):
 
 ```
 locked_by: agent-session
 session_start: <ISO-8601 UTC>
-agent: <claude-code | codex | other>
+session_id: <n>                      # next session number
+session_source: <derived|explicit>   # how session_id was obtained
+agent: <claude-code | codex | other> # mandatory since v1.0 (CANON-010 parity)
+trigger: <founder-mission | recovery | scheduled-routine | ad-hoc>  # session economics
+model: <runtime model id>            # context-meter contract
+context_limit: <tokens>              # context-meter contract
+context_epoch: <ISO-8601 UTC>        # optional; set when context resets mid-session (compaction)
 project: <basename of cwd>
 note: <optional free-form>
 ```
 
-The `agent` field is mandatory as of protocol v1.0. It lets downstream tooling (studio-conductor, hot-swap, audit logs) know which agent is driving the session.
+`agent`, `trigger`, `model` and `context_limit` are the meter contract: `context-meter.mjs` reads them to size the session and attribute its cost. A hand-written `echo … > context/.session-lock` drops them silently and fails the fail-closed provenance check.
 
 ---
 

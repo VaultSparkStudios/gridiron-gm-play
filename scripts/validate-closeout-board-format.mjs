@@ -5,6 +5,11 @@
  * Canonical-format gate for closeout status-board output. Accepts a file path
  * or stdin so both generated artifacts and assistant-produced output can be
  * checked against the shared Studio OS closeout shape.
+ *
+ * Usage:
+ *   node scripts/validate-closeout-board-format.mjs [path] [--json]
+ *   node scripts/validate-closeout-board-format.mjs --stdin [--json] < board.md
+ *   node scripts/validate-closeout-board-format.mjs --help
  */
 
 import fs from 'fs';
@@ -15,6 +20,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 const args = process.argv.slice(2);
+// S358 — Vorn's helper-contract-audit requires Usage + --help; the template bot
+// shipped this file without them and blocked every Vorn push.
+if (args.includes('--help') || args.includes('-h')) {
+  console.log('Usage: node scripts/validate-closeout-board-format.mjs [path] [--json] | --stdin [--json] | --help');
+  process.exit(0);
+}
 const JSON_MODE = args.includes('--json');
 const STDIN_MODE = args.includes('--stdin');
 const positional = args.filter((a) => !a.startsWith('--'));

@@ -69,7 +69,9 @@ const REQUIRED_BLOCKS = [
   },
   {
     label: 'Project title header (Studio OS box)',
-    pattern: /╔═+╗[\s\S]{0,400}?FORGE|SPARKED|VAULTED/,
+    // S358 — grouped (Atlas report, 4th template revert): the ungrouped form
+    // matched a bare SPARKED/VAULTED anywhere, so a brief with no title box passed.
+    pattern: /╔═+╗[\s\S]{0,400}?\b(?:FORGE|SPARKED|VAULTED)\b/,
     severity: 'recommended',
   },
   {

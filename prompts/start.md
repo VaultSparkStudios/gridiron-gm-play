@@ -15,13 +15,11 @@ Write session lock via Bash (avoids Write tool "file not read" guard on new file
 (`scripts/test/tier1-session-lock.mjs`, canonical in `docs/SESSION_PROTOCOL.md` §1) requires
 it for cross-agent parity (CANON-010); omitting it produces a contract-violating lock.
 ```bash
-echo "locked_by: agent-session
-session-id: <n>
-session_start: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-agent: <claude-code|codex|other>
-trigger: <founder-mission|recovery|scheduled-routine|ad-hoc>
-project: <slug>" > context/.session-lock
+node scripts/write-session-lock.mjs --agent <claude-code|codex|other> --trigger <founder-mission|recovery|scheduled-routine|ad-hoc>
 ```
+Never hand-roll the lock with `echo … > context/.session-lock` (S306 contract, re-reported by Vorn
+at S358): the writer derives the session id, stamps model and context-limit provenance, and
+fails closed when provenance is missing. A hand-written lock silently loses those fields.
 The `trigger:` row is mandatory session provenance: use `founder-mission` for a
 human-directed arc, `recovery` for cut-off continuation, `scheduled-routine` for
 cron/cloud work, and `ad-hoc` otherwise. It is consumed by session economics and
