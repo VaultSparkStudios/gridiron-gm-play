@@ -27,11 +27,7 @@ When revising a skill, verify all three before shipping. Drift in any of them (a
 
 ## Session lock format
 
-Every session starts by writing `context/.session-lock` **through the writer**, never by hand:
-
-```bash
-node scripts/write-session-lock.mjs --agent <claude-code|codex|other> --trigger <founder-mission|recovery|scheduled-routine|ad-hoc>
-```
+Every session writes `context/.session-lock` **through the canonical lock writer** at §1 step 1 (after the recovery preflight), never by hand.
 
 The writer emits the full contract (S358: this spec previously listed 5 of these 10 fields, and the template bot propagated the short form over projects whose tests require the full one):
 
