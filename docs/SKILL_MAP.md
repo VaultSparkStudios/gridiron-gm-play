@@ -40,6 +40,7 @@ You rarely need to type these — `/go` proactively suggests them based on proje
 |---|---|---|
 | `/app-release-gate` | Go/no-go checklist before SPARKED or public launch | `app`, `web-app`, `saas` |
 | `/infra-debt-sweep` | Technical debt audit, stale scripts, divergent renderers | `infrastructure`, `internal-ops` |
+| `/studio-market` | Competitive landscape: `docs/market/MARKET.json` + `LANDSCAPE.md` from dated primary sources; feeds table-stake gaps to `/audit` | `website`, `app`, `game` |
 | `/security-check` | One-pass sweep: sanitize settings + scan secrets + audit gateway | any |
 | `/package-trust` | Obelisk gate to rank packages/downloads before install and avoid malicious artifacts | any |
 

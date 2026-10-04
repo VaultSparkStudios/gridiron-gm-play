@@ -651,6 +651,8 @@ Between §3 step 5 (Brainstorm) and step 6 (Commit), every closeout MUST produce
 5. Run: `node scripts/render-closeout-brief.mjs --input .cache/closeout-brief-<session>.json` (add `--ascii` for narrow/Codex terminals — auto-detected when columns < 95).
 6. Renderer writes `docs/CLOSEOUT_BRIEF_<session>_<date>.md` + prints frame to stdout. The "ready to commit & push?" line is the founder-facing review point for attended sessions; it is **advisory, not a blocking interactive gate** (D-S177) — autopilot commits + pushes without pausing for input (safety net: coherence commit gate + secret scan + diff preview).
 
+**§3.7b — Independent review + accountability rescore (S361, D-S361.5).** Before the autopilot commit, run the `studio-reviewer` agent (plugins/studio-os/agents/studio-reviewer.md) on the session diff and its claims, with fresh context. Fix "fix" findings (max 2 rounds), record every round with `node scripts/record-review.mjs`, and report a "reject" or unfixed finding instead of hiding it. Then rescore with `node scripts/measure-ecosystem-scorecard.mjs --write` (Studio Ops) — formulas fixed for the plan's 90 days.
+
 **Project Impact rubric (1–10):** 1–3 hygiene · 4–6 visible · 7–8 new capability · 9–10 milestone.
 **Ecosystem Impact rubric (1–10):** 1–3 local · 4–6 a few siblings · 7–8 10+ repos / canon · 9–10 foundational.
 
